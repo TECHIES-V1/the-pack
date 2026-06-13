@@ -1,0 +1,48 @@
+# Pre-commit: formatting, lint, and a SECRET SCAN before anything is committed (Doc 05 §03).
+# Install once:  pip install pre-commit && pre-commit install
+# Run on demand: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+
+  # Secret scan — real secrets never committed.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # Python (backend): lint + format.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # Frontend: Prettier formatting for TS/TSX/JSON/CSS/MD.
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: ^frontend/.*\.(ts|tsx|css|json|md)$
+
+  # Rust (gateway): cargo fmt check.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt (gateway)
+        entry: bash -c 'cd gateway && cargo fmt --check'
+        language: system
+        files: ^gateway/.*\.rs$
+        pass_filenames: false

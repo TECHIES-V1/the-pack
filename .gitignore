@@ -1,0 +1,46 @@
+# --- Secrets (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Python (backend) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# --- Node (frontend) ---
+node_modules/
+.pnpm-store/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- Rust (gateway) ---
+gateway/target/
+**/*.rs.bk
+
+# --- Local reference material (harvest, never commit) ---
+reference/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Build / logs ---
+*.log
+.coverage
+htmlcov/

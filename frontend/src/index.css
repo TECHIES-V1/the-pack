@@ -1,0 +1,17 @@
+/* @import must precede all other statements (CSS rule). */
+@import "@xyflow/react/dist/style.css";
+@import "./styles/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bone);
+  color: var(--ink);
+}
