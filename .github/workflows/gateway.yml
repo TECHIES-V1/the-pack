@@ -1,0 +1,26 @@
+name: gateway
+
+# Owned by the backend team (Tobi owns engine + gateway). Runs only when gateway/ changes.
+on:
+  push:
+    branches: [main, "setup/**", "feat/**", "fix/**"]
+    paths: ["gateway/**", ".github/workflows/gateway.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["gateway/**", ".github/workflows/gateway.yml"]
+
+jobs:
+  gateway:
+    name: fmt, clippy, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo build --locked
