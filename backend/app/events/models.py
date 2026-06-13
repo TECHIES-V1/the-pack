@@ -16,8 +16,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from ulid import ULID
 
-# Repo layout: <root>/backend/app/events/models.py  ->  <root>/schema/events.schema.json
-SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schema" / "events.schema.json"
+# Layout: backend/app/events/models.py  ->  backend/schema/events.schema.json
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "events.schema.json"
 
 EventType = Literal[
     "hunt_created",
