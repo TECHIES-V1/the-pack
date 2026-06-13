@@ -37,14 +37,15 @@ components. Details in `docs/BORROWING.md`.
 
 ## What was built (the doable gate items)
 
-- **Event schema v1 — FROZEN.** `schema/events.schema.json` (draft 2020-12): the envelope +
-  a discriminated union over all 29 v1 event types from Doc 04 §3.2, plus the provenance
-  span-map shape (§3.3). Mirrored as Pydantic v2 in `backend/app/events/models.py` and TS
-  in `frontend/src/events/types.ts`.
-- **Fixture pack — 4 streams, 112 events.** `fixtures/{flow_a_researcher, flow_b_meeting,
-  boundary_halt, standoff_stray}.jsonl`. Hand-authored, strictly-increasing `seq`,
+- **Event schema v1 — FROZEN.** `backend/schema/events.schema.json` (draft 2020-12): the
+  envelope + a discriminated union over all 29 v1 event types from Doc 04 §3.2, plus the
+  provenance span-map shape (§3.3). Mirrored as Pydantic v2 in
+  `backend/app/events/models.py` and TS in `frontend/src/events/types.ts`.
+- **Fixture pack — 4 streams, 112 events.** `backend/fixtures/{flow_a_researcher,
+  flow_b_meeting, boundary_halt, standoff_stray}.jsonl` (canonical); the frontend keeps a
+  synced copy in `frontend/fixtures/`. Hand-authored, strictly-increasing `seq`,
   append-only. The frontend's fuel and the reducer's/engine's test corpus.
-- **Seven wolf prompts.** `prompts/{alpha,beta,scout,tracker,howler,sentinel,hunter}/v1.md`
+- **Seven wolf prompts.** `backend/prompts/{alpha,beta,scout,tracker,howler,sentinel,hunter}/v1.md`
   with role, Qwen tier, thinking mode, structured-output contract, and span-map provenance
   for Howler/Tracker.
 - **Backend** (`backend/`): FastAPI app with the Doc 04 §6 API surface (commands return
@@ -64,6 +65,22 @@ components. Details in `docs/BORROWING.md`.
 - **Governance:** `README.md` (D1/D2 confirmed), `COMPLIANCE.md` (filled from the official
   rules), `PARKING_LOT.md`, `docs/BORROWING.md`, `LICENSE` (MIT — required for the public
   OSS submission).
+
+## Two-team, self-contained layout
+
+After the initial bring-up, the repo was split so the **frontend** and **backend** teams
+own self-contained folders and never edit the same files (no cross-team merge conflicts):
+
+- `schema/`, `prompts/`, and the canonical `fixtures/` moved **into `backend/`** (the
+  backend produces events and loads prompts).
+- The frontend carries its **own** `frontend/fixtures/` copy (synced via `make
+  sync-fixtures`; backend is canonical) and its own `src/events/types.ts` mirror.
+- `.env.example` split into `backend/.env.example` (secrets) and `frontend/.env.example`
+  (VITE_* only).
+- CI split into per-team workflows: `.github/workflows/{backend,frontend,gateway,secrets}.yml`,
+  each path-filtered to its folder.
+- Per-service `.gitignore` files; the root `.gitignore` is repo-level only.
+- `gateway/` stays its own self-contained top-level unit (backend team, Tobi).
 
 ## Verification run (this machine: Python 3.14, Node 24, pnpm 10, cargo 1.94)
 

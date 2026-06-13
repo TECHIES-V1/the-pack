@@ -1,0 +1,19 @@
+# backend (Python) — self-contained ignores
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+.coverage
+htmlcov/
+
+# secrets — never commit
+.env
+.env.*
+!.env.example

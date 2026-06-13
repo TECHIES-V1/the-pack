@@ -12,7 +12,7 @@ As of **2026-06-13** on branch `setup/day-zero`.
 | 4 | Devpost team formed; every member registered | 🔴 | External. Each member registers on the Devpost page and joins the team. | All |
 | 5 | Repo, CI, and board live; week-1 tasks loaded | 🟡 | **Repo + CI done** (`.github/workflows/ci.yml`: backend/frontend/gateway/secret-scan). Board is external (task tracker) — **needs setup + week-1 tasks loaded.** Repo must be flipped **public**. | Backend 2 / infra (TBD) |
 | 6 | D1 & D2 confirmed in the repo README | ✅ | `README.md` confirms D1 (Python brain + Rust gateway + Redis Streams) and D2 (React Flow). | — |
-| 7 | Event schema v1 frozen; fixture pack committed | ✅ | `schema/events.schema.json` (29 event types) + `fixtures/` (4 streams, 112 events). All validate in CI. | — |
+| 7 | Event schema v1 frozen; fixture pack committed | ✅ | `backend/schema/events.schema.json` (29 event types) + `backend/fixtures/` (4 streams, 112 events; synced copy in `frontend/fixtures/`). All validate in CI. | — |
 | 8 | Design tokens & WolfNode direction approved | 🟡 | Tokens (`frontend/src/styles/tokens.css` + Tailwind) and the WolfNode state matrix + states gallery are built. **Needs design-lead approval** of the direction. | Design (TBD) |
 | 9 | Roster filled; every TBD replaced with a name | 🔴 | Human. Only Tobi (backend lead) is named. Fill the §06 table before the gate (risk R7). | Team lead (TBD) |
 | 10 | Qwen voice model access confirmed; contract may be in flight | 🔴 | Keys/endpoint reachable from a script; full contract freezes **Jun 16**. Fallback: Qwen ASR behind the same Transcriber interface (D7, decision Jun 20). | Backend lead (Tobi) |

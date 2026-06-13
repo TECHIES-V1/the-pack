@@ -25,17 +25,23 @@ Two rules govern everything else:
 
 ## Repo map
 
+The repo is split so the two teams own self-contained folders — nothing they both edit
+lives at the root (keeps merge conflicts off the critical path).
+
 ```
-schema/        events.schema.json — the FROZEN event contract (the spine)
-fixtures/      the four hand-authored event streams (frontend fuel + test corpus)
-prompts/       /{wolf}/v1.md — the seven wolf system prompts
-backend/       the Python engine (FastAPI) — all agent logic + all writes
-gateway/       the Rust gateway (Axum) — realtime read path only
+backend/       the Python engine (FastAPI) — OWNS the contract + all writes
+  schema/        events.schema.json — the FROZEN event contract (the spine)
+  fixtures/      the four hand-authored event streams (canonical copy)
+  prompts/       /{wolf}/v1.md — the seven wolf system prompts
+  app/ tests/ scripts/  engine code, contract tests, hello-pack seam demo
+  .env.example   server-side secrets template
+gateway/       the Rust gateway (Axum) — realtime read path only (self-contained)
 frontend/      the Territory (Vite + React Flow) — renders only from the stream
-docs/          BORROWING.md, pack/ (the build docs), SETUP_REPORT.md, GATE_STATUS.md
-COMPLIANCE.md  hackathon rules answers (two sign-offs required)
-PARKING_LOT.md the scope-creep sink
-docker-compose.yml  local redis + postgres for the hello-pack seam
+  fixtures/      synced copy of the pack (self-contained; backend is canonical)
+  .env.example   VITE_* public config only (no secrets)
+docs/          BORROWING.md, pack/ (build docs), SETUP_REPORT.md, GATE_STATUS.md
+.github/workflows/  one workflow per team: backend / frontend / gateway / secrets
+COMPLIANCE.md · PARKING_LOT.md · LICENSE · Makefile · docker-compose.yml  (lead-owned)
 ```
 
 ## Quickstart

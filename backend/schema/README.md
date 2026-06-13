@@ -27,8 +27,9 @@ Lone-Wolf benchmark all read the **same** stream. Build one, get all six.
 
 - Backend mirrors this as Pydantic v2 models in `backend/app/events/models.py`.
 - Frontend mirrors the envelope + reducer types in `frontend/src/events/`.
-- The fixture pack in `fixtures/` is validated against this schema in CI
-  (`backend/tests/test_contract.py`). **The fixtures stay green.**
+- The fixture pack in `backend/fixtures/` is validated against this schema in CI
+  (`backend/tests/test_contract.py`). **The fixtures stay green.** The frontend keeps a
+  synced copy in `frontend/fixtures/` (`make sync-fixtures`).
 
 ## Changing the schema
 

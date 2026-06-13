@@ -3,7 +3,7 @@
 # Windows note: `make` is not native. Use `pwsh scripts/dev.ps1` (see that file) or run the
 # per-service targets in separate terminals. On macOS/Linux/WSL/git-bash, `make` works.
 
-.PHONY: help dev infra backend gateway frontend test fixtures-check install hooks
+.PHONY: help dev infra backend gateway frontend test sync-fixtures install hooks
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  make gateway    - run the Rust gateway (:8080)"
 	@echo "  make frontend   - run the Vite dev server (:5173)"
 	@echo "  make test       - backend contract tests + frontend reducer tests + cargo check"
+	@echo "  make sync-fixtures - copy canonical backend/fixtures -> frontend/fixtures"
 	@echo "  make hooks      - install pre-commit hooks"
 
 install:
@@ -42,6 +43,11 @@ test:
 	cd backend && (uv run pytest -q || pytest -q)
 	cd frontend && pnpm test
 	cd gateway && cargo check
+
+# backend/fixtures is canonical; the frontend keeps a synced copy so it stays
+# self-contained. Run this whenever the fixture pack changes.
+sync-fixtures:
+	cp backend/fixtures/*.jsonl frontend/fixtures/
 
 hooks:
 	pre-commit install
