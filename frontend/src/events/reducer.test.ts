@@ -10,7 +10,9 @@ import { reduceAll, initialHuntView, reduce } from "./reducer";
 import type { PackEvent } from "./types";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES = path.resolve(here, "../../../fixtures");
+// Frontend carries its own copy of the fixture pack (frontend/fixtures) so the team never
+// reaches outside this folder. Canonical copy lives in backend/fixtures; keep them in sync.
+const FIXTURES = path.resolve(here, "../../fixtures");
 
 function load(name: string): PackEvent[] {
   return readFileSync(path.join(FIXTURES, name), "utf-8")
