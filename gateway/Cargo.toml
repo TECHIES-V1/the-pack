@@ -1,0 +1,19 @@
+[package]
+name = "pack-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Pack — the Rust gateway. The realtime read path only: replay a hunt's stream from any seq, then live-tail it. Zero agent logic. A very fast pipe (Doc 04 §2)."
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+redis = { version = "0.27", features = ["tokio-comp", "streams"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[[bin]]
+name = "pack-gateway"
+path = "src/main.rs"

@@ -1,0 +1,3 @@
+# gateway (Rust) — self-contained ignores
+/target/
+**/*.rs.bk

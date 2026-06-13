@@ -1,0 +1,23 @@
+# Root — repo-level only. Each service owns its own .gitignore:
+#   backend/.gitignore · frontend/.gitignore · gateway/.gitignore
+
+# --- Secrets (NEVER commit), repo-wide safety net ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Local reference material (harvest, never commit) ---
+reference/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Logs ---
+*.log

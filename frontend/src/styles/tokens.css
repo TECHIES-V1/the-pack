@@ -1,0 +1,45 @@
+/* Design tokens — color, type, spacing, motion (Doc 05 §05 design direction).
+   Mirrors tailwind.config.ts as CSS variables for use outside Tailwind (e.g. React Flow
+   node inline styles, which the WolfNode reads). Single source: keep these two in sync. */
+
+:root {
+  /* color */
+  --ink: #1f2a3c;
+  --ink-soft: #2b3a52;
+  --bone: #f7f3ec;
+  --accent: #e6a23c;
+  --accent-soft: #f0c987;
+
+  /* wolf states (Doc 03 §6 matrix) */
+  --wolf-idle: #9ca3af;
+  --wolf-hunting: #e6a23c;
+  --wolf-talking: #5b9bd5;
+  --wolf-holding: #c084fc;
+  --wolf-stray: #eb3424;
+  --wolf-done: #3fb27f;
+
+  /* type */
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  /* spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* motion — animation is information, never decoration (Doc 03 §7) */
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+  --motion-slow: 400ms;
+  --easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+}

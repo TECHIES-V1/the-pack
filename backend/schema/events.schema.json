@@ -1,0 +1,360 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sendthepack.com/schema/events/v1.json",
+  "title": "Pack Event Envelope v1",
+  "description": "FROZEN June 12, 2026. The single source of truth and the frontend-backend contract (Doc 04 §3). seq is strictly increasing per hunt; events are append-only and never edited. If it is not an event, it did not happen.",
+  "type": "object",
+  "required": ["event_id", "hunt_id", "seq", "ts", "type", "actor", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "description": "ULID, e.g. evt_01J..." },
+    "hunt_id": { "type": "string", "description": "ULID, e.g. hunt_01J..." },
+    "seq": { "type": "integer", "minimum": 0, "description": "Strictly increasing per hunt." },
+    "ts": { "type": "string", "format": "date-time" },
+    "type": { "type": "string", "$ref": "#/$defs/eventType" },
+    "actor": { "type": "string", "description": "Wolf id (e.g. scout-2) or 'engine' / 'alpha' / 'user'." },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "hunt_created" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_created" } } } },
+    { "if": { "properties": { "type": { "const": "input_added" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/input_added" } } } },
+    { "if": { "properties": { "type": { "const": "transcript_ready" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/transcript_ready" } } } },
+    { "if": { "properties": { "type": { "const": "plan_proposed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/plan_proposed" } } } },
+    { "if": { "properties": { "type": { "const": "plan_edited" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/plan_edited" } } } },
+    { "if": { "properties": { "type": { "const": "plan_approved" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/plan_approved" } } } },
+    { "if": { "properties": { "type": { "const": "wolf_spawned" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/wolf_spawned" } } } },
+    { "if": { "properties": { "type": { "const": "step_started" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/step_started" } } } },
+    { "if": { "properties": { "type": { "const": "step_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/step_completed" } } } },
+    { "if": { "properties": { "type": { "const": "message_passed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/message_passed" } } } },
+    { "if": { "properties": { "type": { "const": "tool_called" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tool_called" } } } },
+    { "if": { "properties": { "type": { "const": "tool_result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tool_result" } } } },
+    { "if": { "properties": { "type": { "const": "tokens_spent" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tokens_spent" } } } },
+    { "if": { "properties": { "type": { "const": "hold_opened" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hold_opened" } } } },
+    { "if": { "properties": { "type": { "const": "hold_resolved" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hold_resolved" } } } },
+    { "if": { "properties": { "type": { "const": "standoff_opened" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/standoff_opened" } } } },
+    { "if": { "properties": { "type": { "const": "standoff_turn" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/standoff_turn" } } } },
+    { "if": { "properties": { "type": { "const": "standoff_resolved" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/standoff_resolved" } } } },
+    { "if": { "properties": { "type": { "const": "stray_detected" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_detected" } } } },
+    { "if": { "properties": { "type": { "const": "stray_recovered" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_recovered" } } } },
+    { "if": { "properties": { "type": { "const": "boundary_warning" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_warning" } } } },
+    { "if": { "properties": { "type": { "const": "boundary_downgrade" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_downgrade" } } } },
+    { "if": { "properties": { "type": { "const": "boundary_halt" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_halt" } } } },
+    { "if": { "properties": { "type": { "const": "artifact_created" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/artifact_created" } } } },
+    { "if": { "properties": { "type": { "const": "hunt_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_completed" } } } },
+    { "if": { "properties": { "type": { "const": "hunt_failed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_failed" } } } },
+    { "if": { "properties": { "type": { "const": "hunt_stopped" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_stopped" } } } },
+    { "if": { "properties": { "type": { "const": "benchmark_started" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/benchmark_started" } } } },
+    { "if": { "properties": { "type": { "const": "benchmark_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/benchmark_completed" } } } }
+  ],
+  "$defs": {
+    "eventType": {
+      "enum": [
+        "hunt_created", "input_added", "transcript_ready",
+        "plan_proposed", "plan_edited", "plan_approved",
+        "wolf_spawned", "step_started", "step_completed", "message_passed",
+        "tool_called", "tool_result", "tokens_spent",
+        "hold_opened", "hold_resolved",
+        "standoff_opened", "standoff_turn", "standoff_resolved",
+        "stray_detected", "stray_recovered",
+        "boundary_warning", "boundary_downgrade", "boundary_halt",
+        "artifact_created",
+        "hunt_completed", "hunt_failed", "hunt_stopped",
+        "benchmark_started", "benchmark_completed"
+      ]
+    },
+    "span": {
+      "type": "object",
+      "description": "One provenance span on a final artifact (Doc 04 §3.3). Powers click-to-trace.",
+      "required": ["span", "produced_by", "source_refs"],
+      "properties": {
+        "span": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "produced_by": { "type": "string" },
+        "source_refs": { "type": "array", "items": { "type": "string" } },
+        "standoff_ids": { "type": "array", "items": { "type": "string" } },
+        "transcript_ts": { "type": ["number", "null"], "description": "Seconds into the recording for audio-derived spans." }
+      }
+    },
+    "payloads": {
+      "hunt_created": {
+        "type": "object",
+        "required": ["source", "raw_input_ref"],
+        "properties": {
+          "source": { "enum": ["typed", "spoken", "dropped"] },
+          "raw_input_ref": { "type": "string" }
+        }
+      },
+      "input_added": {
+        "type": "object",
+        "required": ["artifact_id", "kind", "mid_hunt"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "kind": { "enum": ["audio", "video", "pdf", "csv", "url", "text"] },
+          "mid_hunt": { "type": "boolean" }
+        }
+      },
+      "transcript_ready": {
+        "type": "object",
+        "required": ["artifact_id", "provider", "duration_s"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "provider": { "enum": ["qwen_voice", "qwen_asr"] },
+          "language_hint": { "type": ["string", "null"] },
+          "duration_s": { "type": "number" }
+        }
+      },
+      "plan_proposed": {
+        "type": "object",
+        "required": ["steps", "wolves", "pattern", "est_cost", "est_time"],
+        "properties": {
+          "steps": { "type": "array" },
+          "wolves": { "type": "array", "items": { "type": "string" } },
+          "pattern": { "enum": ["sequential", "hierarchical", "parallel_then_merge", "standoff"] },
+          "assumptions": { "type": "array", "items": { "type": "string" } },
+          "est_cost": { "type": "number" },
+          "est_time": { "type": "number" }
+        }
+      },
+      "plan_edited": {
+        "type": "object",
+        "required": ["diff"],
+        "properties": { "diff": { "type": "object" } }
+      },
+      "plan_approved": {
+        "type": "object",
+        "required": ["mode", "boundary_usd"],
+        "properties": {
+          "mode": { "enum": ["wild", "on_signal", "on_command"] },
+          "boundary_usd": { "type": "number" }
+        }
+      },
+      "wolf_spawned": {
+        "type": "object",
+        "required": ["wolf_id", "role", "model_tier", "thinking", "prompt_version"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "role": { "enum": ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder"] },
+          "model_tier": { "enum": ["max", "plus", "flash"] },
+          "thinking": { "type": "boolean" },
+          "prompt_version": { "type": "string" }
+        }
+      },
+      "step_started": {
+        "type": "object",
+        "required": ["step_id", "wolf_id", "summary"],
+        "properties": {
+          "step_id": { "type": "string" },
+          "wolf_id": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      },
+      "step_completed": {
+        "type": "object",
+        "required": ["step_id", "wolf_id", "output_ref", "confidence"],
+        "properties": {
+          "step_id": { "type": "string" },
+          "wolf_id": { "type": "string" },
+          "output_ref": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      },
+      "message_passed": {
+        "type": "object",
+        "required": ["from_wolf", "to_wolf", "intent", "summary"],
+        "properties": {
+          "from_wolf": { "type": "string" },
+          "to_wolf": { "type": "string" },
+          "intent": { "type": "string" },
+          "summary": { "type": "string" },
+          "ref": { "type": ["string", "null"] }
+        }
+      },
+      "tool_called": {
+        "type": "object",
+        "required": ["wolf_id", "tool", "args_summary"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "tool": { "enum": ["web_search", "web_fetch", "file_parse", "transcribe", "artifact_write"] },
+          "args_summary": { "type": "string" }
+        }
+      },
+      "tool_result": {
+        "type": "object",
+        "required": ["wolf_id", "tool", "ok", "latency_ms"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "tool": { "type": "string" },
+          "ok": { "type": "boolean" },
+          "result_ref": { "type": ["string", "null"] },
+          "latency_ms": { "type": "integer" }
+        }
+      },
+      "tokens_spent": {
+        "type": "object",
+        "required": ["wolf_id", "model", "in_tokens", "out_tokens", "cost_usd", "cumulative_usd"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "model": { "type": "string" },
+          "in_tokens": { "type": "integer" },
+          "out_tokens": { "type": "integer" },
+          "cost_usd": { "type": "number" },
+          "cumulative_usd": { "type": "number" }
+        }
+      },
+      "hold_opened": {
+        "type": "object",
+        "required": ["hold_id", "question", "options", "recommended"],
+        "properties": {
+          "hold_id": { "type": "string" },
+          "question": { "type": "string" },
+          "context_ref": { "type": ["string", "null"] },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "recommended": { "type": "string" }
+        }
+      },
+      "hold_resolved": {
+        "type": "object",
+        "required": ["hold_id", "resolution"],
+        "properties": {
+          "hold_id": { "type": "string" },
+          "resolution": { "type": "string" },
+          "edited_text": { "type": ["string", "null"] }
+        }
+      },
+      "standoff_opened": {
+        "type": "object",
+        "required": ["standoff_id", "challenger", "defendant", "claim_ref"],
+        "properties": {
+          "standoff_id": { "type": "string" },
+          "challenger": { "type": "string" },
+          "defendant": { "type": "string" },
+          "claim_ref": { "type": "string" }
+        }
+      },
+      "standoff_turn": {
+        "type": "object",
+        "required": ["standoff_id", "turn_no", "argument_summary"],
+        "properties": {
+          "standoff_id": { "type": "string" },
+          "turn_no": { "type": "integer", "minimum": 1, "maximum": 3 },
+          "argument_summary": { "type": "string" }
+        }
+      },
+      "standoff_resolved": {
+        "type": "object",
+        "required": ["standoff_id", "outcome", "rationale"],
+        "properties": {
+          "standoff_id": { "type": "string" },
+          "outcome": { "enum": ["agreement", "alpha_call", "hold_opened"] },
+          "rationale": { "type": "string" }
+        }
+      },
+      "stray_detected": {
+        "type": "object",
+        "required": ["wolf_id", "pattern", "evidence_ref"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "pattern": { "enum": ["repeat_fail", "loop", "timeout"] },
+          "evidence_ref": { "type": "string" }
+        }
+      },
+      "stray_recovered": {
+        "type": "object",
+        "required": ["wolf_id", "action", "note_plain_english"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "action": { "enum": ["reroute", "replan", "respawn"] },
+          "note_plain_english": { "type": "string" }
+        }
+      },
+      "boundary_warning": {
+        "type": "object",
+        "required": ["pct", "cumulative_usd"],
+        "properties": {
+          "pct": { "type": "number" },
+          "cumulative_usd": { "type": "number" }
+        }
+      },
+      "boundary_downgrade": {
+        "type": "object",
+        "required": ["wolf_id", "from_tier", "to_tier", "thinking_off"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "from_tier": { "enum": ["max", "plus", "flash"] },
+          "to_tier": { "enum": ["max", "plus", "flash"] },
+          "thinking_off": { "type": "boolean" }
+        }
+      },
+      "boundary_halt": {
+        "type": "object",
+        "required": ["checkpoint_id", "spend_breakdown", "resume_options"],
+        "properties": {
+          "checkpoint_id": { "type": "string" },
+          "spend_breakdown": { "type": "object" },
+          "resume_options": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "artifact_created": {
+        "type": "object",
+        "required": ["artifact_id", "kind", "produced_by"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "kind": { "enum": ["draft", "final", "scorecard", "transcript"] },
+          "produced_by": { "type": "string" },
+          "provenance_span_map_ref": { "type": ["string", "null"] }
+        }
+      },
+      "hunt_completed": {
+        "type": "object",
+        "required": ["final_artifact_id", "totals"],
+        "properties": {
+          "final_artifact_id": { "type": "string" },
+          "totals": { "type": "object" }
+        }
+      },
+      "hunt_failed": {
+        "type": "object",
+        "required": ["reason_plain_english"],
+        "properties": {
+          "reason_plain_english": { "type": "string" },
+          "partials_ref": { "type": ["string", "null"] }
+        }
+      },
+      "hunt_stopped": {
+        "type": "object",
+        "required": ["by"],
+        "properties": { "by": { "enum": ["user"] } }
+      },
+      "benchmark_started": {
+        "type": "object",
+        "required": ["lone_wolf_config"],
+        "properties": { "lone_wolf_config": { "type": "object" } }
+      },
+      "benchmark_completed": {
+        "type": "object",
+        "required": ["scorecard"],
+        "properties": {
+          "scorecard": {
+            "type": "object",
+            "description": "Scores for BOTH runs: quality, citations, cost, time, sources.",
+            "required": ["lone_wolf", "pack"],
+            "properties": {
+              "lone_wolf": { "$ref": "#/$defs/scorecardRun" },
+              "pack": { "$ref": "#/$defs/scorecardRun" }
+            }
+          }
+        }
+      }
+    },
+    "scorecardRun": {
+      "type": "object",
+      "required": ["quality", "citations", "cost_usd", "time_s", "sources"],
+      "properties": {
+        "quality": { "type": "number" },
+        "citations": { "type": "integer" },
+        "cost_usd": { "type": "number" },
+        "time_s": { "type": "number" },
+        "sources": { "type": "integer" }
+      }
+    }
+  }
+}
