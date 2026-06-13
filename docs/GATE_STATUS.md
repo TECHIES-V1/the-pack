@@ -20,7 +20,7 @@ As of **2026-06-12** (gate closes **Jun 13**) on branch `setup/day-zero`.
 | 2 | One real Qwen API call from our code | 🔴 | Qwen client chokepoint scaffolded (`backend/app/qwen/client.py`). Needs a key + the real model names from Model Studio. **Next:** a 10-line script hits a Qwen model and prints a reply. | **Tobi** |
 | 3 | Rules read by all; `COMPLIANCE.md` committed; Qwen-voice disclosure noted | 🟡 | `COMPLIANCE.md` written from the **official rules** with the Qwen-voice disclosure. **Needs two sign-offs** + the team to read the rules. | **Bezzy** (draft) + 2 sign-offs |
 | 4 | Devpost team formed; every member registered | 🔴 | Each member registers on the Devpost page and joins the team. | **All** |
-| 5 | Repo, CI, and board live; week-1 tasks loaded | 🟡 | **Repos + CI done** — backend repo up; per-team workflows (`.github/workflows/{backend,frontend,gateway,secrets}.yml`). **Needs:** frontend repo/scaffold stood up, repo flipped **public**, the board created + week-1 tasks loaded. | **Tobi** (backend/board), **Eyitayo** (frontend) |
+| 5 | Repo, CI, and board live; week-1 tasks loaded | 🟡 | **Repo + CI done** — backend AND frontend both scaffolded in the repo (frontend: Vite + React Flow, canvas/WolfNode, reducer; tests + build green); per-team workflows (`.github/workflows/{backend,frontend,gateway,secrets}.yml`). **Needs:** repo flipped **public**, the board created + week-1 tasks loaded. | **Tobi** (public + board) |
 | 6 | D1 & D2 confirmed in the repo README | ✅ | `README.md` confirms D1 (Python brain + Rust gateway + Redis Streams) and D2 (React Flow). Note: hello-pack ships **Python-only** (FastAPI serves the stream); Rust is W2/W3. | — |
 | 7 | Event schema v1 frozen; fixture pack committed | ✅ | `backend/schema/events.schema.json` (29 event types) + `backend/fixtures/` (4 streams, 112 events; synced copy in `frontend/fixtures/`). All validate in CI. | Tobi / Bezzy |
 | 8 | Design tokens & WolfNode direction approved | 🟡 | Tokens (`frontend/src/styles/tokens.css` + Tailwind) and the WolfNode state matrix + states gallery are built. **Needs design-lead approval** of the direction. | **Abdul** |
@@ -39,8 +39,9 @@ repo + board + repo→public).
    region). If blocked, escalate to organizers via Discord + email **today** and test an
    alternate card/entity in parallel. Boxes 2, 10, and hello-pack all wait on this.
 2. **Box 2 — Tobi:** once the key exists, run the 10-line Qwen call (token counts flowing).
-3. **Box 5:** Eyitayo stands up the frontend repo; Tobi flips repos **public** + creates the
-   board and loads week-1 tasks.
+3. **Box 5:** Tobi flips the repo **public** + creates the board and loads week-1 tasks.
+   Frontend is already scaffolded — Eyitayo & team start building the screens against the
+   schema.
 4. **Box 3 (Bezzy → two sign-offs)** and **Box 8 (Abdul approves the direction)**.
 5. **Box 4:** everyone registers on Devpost and joins the team.
 6. **Box 10** tracks to the Jun 16 voice-contract freeze.
@@ -50,7 +51,7 @@ repo + board + repo→public).
 - Event schema + fixtures (box 7) — the spine the whole frontend builds against.
 - D1/D2 in the README (box 6).
 - Roster filled (box 9).
-- Repos + CI half of box 5 (backend repo + per-team workflows).
+- Repo + CI half of box 5 (backend + frontend both scaffolded, tests/build green, per-team workflows).
 - Tokens/WolfNode built (box 8 — pending Abdul's approval).
 - `COMPLIANCE.md` drafted (box 3 — pending two sign-offs).
 - `LICENSE` added — required for the public OSS submission (see `COMPLIANCE.md` §4).
