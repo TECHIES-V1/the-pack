@@ -14,8 +14,8 @@ from jsonschema import Draft202012Validator
 
 from app.events.models import EVENT_TYPES, load_event_schema
 
-ROOT = Path(__file__).resolve().parents[2]
-FIXTURES_DIR = ROOT / "fixtures"
+BACKEND = Path(__file__).resolve().parents[1]
+FIXTURES_DIR = BACKEND / "fixtures"
 FIXTURE_FILES = sorted(FIXTURES_DIR.glob("*.jsonl"))
 
 

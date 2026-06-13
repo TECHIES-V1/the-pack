@@ -23,7 +23,7 @@ import redis.asyncio as redis
 
 from app.config import settings
 
-FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def stream_key(hunt_id: str) -> str:
