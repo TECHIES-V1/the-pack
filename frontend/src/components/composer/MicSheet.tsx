@@ -1,5 +1,19 @@
 import { useEffect, useRef } from "react";
 
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  start(): void;
+  stop(): void;
+}
+
 interface MicSheetProps {
   onTranscript: (text: string) => void;
 }
@@ -7,7 +21,9 @@ interface MicSheetProps {
 export function MicSheet({ onTranscript }: MicSheetProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -21,7 +37,7 @@ export function MicSheet({ onTranscript }: MicSheetProps) {
     });
     ro.observe(canvas);
     canvas.width = canvas.offsetWidth || 560;
-    canvas.height = canvas.offsetHeight || 20;
+    canvas.height = canvas.offsetHeight || 36;
 
     // --- Waveform tuning ---
     // SPEED: increase to animate faster, decrease for slower pulse (default: 1.8)
@@ -47,16 +63,13 @@ export function MicSheet({ onTranscript }: MicSheetProps) {
       for (let i = 0; i < barCount; i++) {
         const x = i * (BAR_WIDTH + GAP);
         const norm = i / barCount;
-        // bell curve envelope — tall in the middle, short at edges
         const envelope = Math.pow(Math.sin(norm * Math.PI), 0.6);
-        // layered sin waves for organic variation
         const wave =
           0.5 * Math.abs(Math.sin(t * SPEED + i * 0.35)) +
           0.3 * Math.abs(Math.sin(t * SPEED * 1.3 + i * 0.6 + 1.2)) +
           0.2 * Math.abs(Math.sin(t * SPEED * 0.7 + i * 0.9 + 2.5));
         const height = MIN_HEIGHT + envelope * maxH * wave;
         const y = (H - height) / 2;
-        // left ~45% dim, right ~55% bright white — matches ChatGPT style
         ctx.fillStyle = norm < 0.45 ? "#4a4a4a" : "#ffffff";
         ctx.beginPath();
         ctx.roundRect(x, y, BAR_WIDTH, height, BAR_WIDTH / 2);
@@ -67,8 +80,11 @@ export function MicSheet({ onTranscript }: MicSheetProps) {
     }
     draw();
 
-    const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    const win = window as Window & {
+      SpeechRecognition?: new () => SpeechRecognitionInstance;
+      webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+    };
+    const SpeechRecognitionAPI = win.SpeechRecognition ?? win.webkitSpeechRecognition;
     if (SpeechRecognitionAPI) {
       const recognition = new SpeechRecognitionAPI();
       recognition.continuous = true;
@@ -76,12 +92,12 @@ export function MicSheet({ onTranscript }: MicSheetProps) {
       recognition.lang = "en-US";
       recognitionRef.current = recognition;
       let finalText = "";
-      recognition.onresult = (e: any) => {
+      recognition.onresult = (e: SpeechRecognitionEvent) => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) finalText += e.results[i][0].transcript + " ";
-          else onTranscript((finalText + e.results[i][0].transcript).trim());
+          else onTranscriptRef.current((finalText + e.results[i][0].transcript).trim());
         }
-        if (finalText) onTranscript(finalText.trim());
+        if (finalText) onTranscriptRef.current(finalText.trim());
       };
       recognition.start();
     }
