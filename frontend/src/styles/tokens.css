@@ -36,6 +36,16 @@
   --easing: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Door page tokens — isolated from the Territory palette */
+:root {
+  --door-bg: #0F0F0F;
+  --door-surface: #1A1A1A;
+  --door-border: #404040;
+  --door-text: #ffffff;
+  --door-text-dim: #A3A3A3;
+  --door-red: #e03a2f;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0ms;

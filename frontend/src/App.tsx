@@ -5,14 +5,37 @@
 import { useEffect, useState } from "react";
 
 import { Territory } from "@/canvas/Territory";
+import { DoorPage } from "@/pages/DoorPage";
+import { PlanPage } from "@/pages/PlanPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { useHuntStore } from "@/store/huntStore";
 import { sampleStream } from "@/demo/sampleStream";
 
-type View = "door" | "territory" | "gallery";
+type View = "door" | "territory" | "gallery" | "plan";
+
+function getInitialView(): View {
+  const path = window.location.pathname.replace(/^\//, "");
+  if (path === "door" || path === "territory" || path === "gallery") return path;
+  if (path.startsWith("plan")) return "plan";
+  return "territory";
+}
 
 export default function App() {
-  const [view, setView] = useState<View>("territory");
+  const [view, setView] = useState<View>(getInitialView);
+
+  function navigate(v: View) {
+    setView(v);
+    window.history.pushState({}, "", `/${v}`);
+  }
+
+  useEffect(() => {
+    function onPopState() {
+      setView(getInitialView());
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const huntView = useHuntStore((s) => s.view);
   const apply = useHuntStore((s) => s.apply);
   const reset = useHuntStore((s) => s.reset);
@@ -50,7 +73,7 @@ export default function App() {
           {(["door", "territory", "gallery"] as View[]).map((v) => (
             <button
               key={v}
-              onClick={() => setView(v)}
+              onClick={() => navigate(v)}
               style={{
                 background: view === v ? "var(--accent)" : "transparent",
                 color: view === v ? "var(--ink)" : "var(--bone)",
@@ -73,27 +96,8 @@ export default function App() {
       </header>
 
       <main style={{ flex: 1, minHeight: 0 }}>
-        {view === "door" && (
-          <div style={{ display: "grid", placeItems: "center", height: "100%", padding: 24 }}>
-            <div style={{ width: "min(640px, 90%)", textAlign: "center" }}>
-              <h1 style={{ fontSize: 28 }}>What should the pack hunt down?</h1>
-              <input
-                aria-label="What should the pack hunt down?"
-                placeholder="Type, speak, or drop…"
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  borderRadius: 12,
-                  border: "1px solid var(--wolf-idle)",
-                  fontSize: 16,
-                }}
-              />
-              <p style={{ color: "var(--ink-soft)", marginTop: 12 }}>
-                Door scaffold (S1). OneBox / MicSheet / DropHalo land in WS-B.
-              </p>
-            </div>
-          </div>
-        )}
+        {view === "door" && <DoorPage />}
+        {view === "plan" && <PlanPage />}
         {view === "territory" && <Territory view={huntView} />}
         {view === "gallery" && <StatesGallery />}
       </main>

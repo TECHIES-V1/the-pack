@@ -16,6 +16,12 @@ export default {
           DEFAULT: "#e6a23c", // doc-cover orange
           soft: "#f0c987",
         },
+        door: {
+          bg: "#0F0F0F",
+          surface: "#1A1A1A",
+          border: "#404040",
+          dim: "#A3A3A3",
+        },
         wolf: {
           idle: "#9ca3af",
           hunting: "#e6a23c",
