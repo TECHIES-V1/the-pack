@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MicSheet } from "./MicSheet";
 
 type Mode = "Signal" | "On Wild" | "On Command";
@@ -33,31 +33,7 @@ export function OneBox({ droppedFiles = [], prefill, onFilesAdded, onFileRemoved
   const dropdownRef = useRef<HTMLDivElement>(null);
   const processedIds = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (prefill) {
-      setValue(prefill);
-      textareaRef.current?.focus();
-    }
-  }, [prefill]);
-
-  useEffect(() => {
-    if (droppedFiles.length === 0) return;
-    addFiles(droppedFiles);
-  }, [droppedFiles]);
-
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setModeOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  function addFiles(files: File[]) {
+  const addFiles = useCallback((files: File[]) => {
     const newFiles: File[] = [];
     for (const file of files) {
       const id = `${file.name}-${file.size}`;
@@ -72,7 +48,30 @@ export function OneBox({ droppedFiles = [], prefill, onFilesAdded, onFileRemoved
       }, 1200);
     }
     if (newFiles.length > 0) onFilesAdded?.(newFiles);
-  }
+  }, [onFilesAdded]);
+
+  useEffect(() => {
+    if (prefill) {
+      setValue(prefill);
+      textareaRef.current?.focus();
+    }
+  }, [prefill]);
+
+  useEffect(() => {
+    if (droppedFiles.length === 0) return;
+    addFiles(droppedFiles);
+  }, [droppedFiles, addFiles]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setModeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   function handleInput() {
     const el = textareaRef.current;
