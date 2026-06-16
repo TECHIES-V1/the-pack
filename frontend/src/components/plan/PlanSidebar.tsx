@@ -1,13 +1,6 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { FaStar } from "react-icons/fa";
-import {
-  LuChartBar,
-  LuRoute,
-  LuTarget,
-  LuPen,
-  LuPanelRight,
-} from "react-icons/lu";
+import { LuRoute, LuPen, LuPanelRight } from "react-icons/lu";
 import { BiSolidBarChartAlt2 } from "react-icons/bi";
 import { PiCrosshairBold } from "react-icons/pi";
 import type { PlanView } from "@/events/reducer";
