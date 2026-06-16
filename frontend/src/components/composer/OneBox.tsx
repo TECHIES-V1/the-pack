@@ -14,6 +14,7 @@ interface AttachedFile {
 interface OneBoxProps {
   droppedFiles?: File[];
   prefill?: string;
+  placeholder?: string;
   onFilesAdded?: (files: File[]) => void;
   onFileRemoved?: (name: string) => void;
   onFolderRejected?: () => void;
@@ -21,7 +22,7 @@ interface OneBoxProps {
   onRecordingChange?: (recording: boolean) => void;
 }
 
-export function OneBox({ droppedFiles = [], prefill, onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange }: OneBoxProps) {
+export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange }: OneBoxProps) {
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -100,13 +101,16 @@ export function OneBox({ droppedFiles = [], prefill, onFilesAdded, onFileRemoved
     setSubmitting(true);
     setTimeout(() => {
       onSubmit?.({ text: value, attachments, mode });
+      setValue("");
+      setAttachments([]);
+      setSubmitting(false);
     }, 900);
   }
 
   const canSubmit = value.trim().length > 0 || attachments.length > 0;
 
   return (
-    <div className="w-[min(880px,90vw)] bg-door-surface border border-door-border rounded-2xl px-4 pt-3.5 pb-3 flex flex-col gap-4">
+    <div className="w-full bg-door-surface border border-door-border rounded-2xl px-4 pt-3.5 pb-3 flex flex-col gap-4">
       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
 
       {/* File tiles — above textarea */}
@@ -182,7 +186,7 @@ export function OneBox({ droppedFiles = [], prefill, onFilesAdded, onFileRemoved
             handleSubmit();
           }
         }}
-        placeholder="What should the pack hunt down?"
+        placeholder={placeholder}
         rows={1}
         className="w-full bg-transparent border-none outline-none resize-none text-white text-[15px] font-sans leading-relaxed p-0 overflow-hidden placeholder:text-door-dim"
       />

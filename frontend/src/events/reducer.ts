@@ -42,6 +42,21 @@ export interface BoundaryView {
   status: BoundaryStatus;
 }
 
+export interface PlanStep {
+  step_id: string;
+  summary: string;
+  wolves: string[];
+}
+
+export interface PlanView {
+  steps: PlanStep[];
+  wolves: string[];
+  pattern: string;
+  assumptions: string[];
+  est_cost: number;
+  est_time: number;
+}
+
 export interface HuntView {
   huntId: string | null;
   state: HuntState;
@@ -53,6 +68,7 @@ export interface HuntView {
   activeStandoffId: string | null;
   finalArtifactId: string | null;
   totals: Record<string, unknown> | null;
+  plan: PlanView | null;
 }
 
 export function initialHuntView(): HuntView {
@@ -67,6 +83,7 @@ export function initialHuntView(): HuntView {
     activeStandoffId: null,
     finalArtifactId: null,
     totals: null,
+    plan: null,
   };
 }
 
@@ -108,7 +125,18 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       return { ...s, state: "planning" };
 
     case "plan_proposed":
-      return { ...s, state: "plan_ready" };
+      return {
+        ...s,
+        state: "plan_ready",
+        plan: {
+          steps: f<PlanStep[]>(ev, "steps"),
+          wolves: f<string[]>(ev, "wolves"),
+          pattern: f(ev, "pattern"),
+          assumptions: f<string[]>(ev, "assumptions"),
+          est_cost: f<number>(ev, "est_cost"),
+          est_time: f<number>(ev, "est_time"),
+        },
+      };
 
     case "plan_approved":
       return {
