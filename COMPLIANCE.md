@@ -69,7 +69,7 @@ not Lagos. 2:00 pm PT ≈ **23:00 WAT (Lagos)** on July 9. We submit **July 8** 
 a full day of buffer. Deadlines bite in the organizer's timezone.
 
 ## Sign-offs (two required)
-- [X]Sign-off 1: Tobi (Team Lead Sign-off)-Approved for Backend & Schema Alignment 
+- [X] Sign-off 1: Tobi (Team Lead Sign-off)-Approved for Backend & Schema Alignment 
 - [X] Sign-off 2: Eyitayo (Frontend Lead Sign Off)-Approved for Frontend Canvas Alignment 
 
 ## Open verification items before the gate
