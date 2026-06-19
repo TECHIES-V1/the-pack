@@ -68,6 +68,27 @@ class Repo:
             "last_seq": await self.get_last_seq(hunt_id),
         }
 
+    async def list_hunts(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Most-recent hunts first — powers the Den (Past Hunts)."""
+        rows = await self._pool.fetch(
+            """
+            SELECT hunt_id, state, source, raw_input, boundary_usd, created_at
+            FROM hunts ORDER BY created_at DESC LIMIT $1
+            """,
+            limit,
+        )
+        return [
+            {
+                "hunt_id": r["hunt_id"],
+                "state": r["state"],
+                "source": r["source"],
+                "title": (r["raw_input"] or "").strip()[:80] or "Untitled hunt",
+                "boundary_usd": r["boundary_usd"],
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ]
+
     # --- events (the log + the outbox) -------------------------------------------------
 
     async def get_last_seq(self, hunt_id: str) -> int:
@@ -175,6 +196,26 @@ class Repo:
             produced_by,
             content,
         )
+
+    async def get_final_artifact(self, hunt_id: str) -> dict[str, Any] | None:
+        """The hunt's final artifact (Howler's draft) for the reading view, or None."""
+        row = await self._pool.fetchrow(
+            """
+            SELECT artifact_id, hunt_id, kind, produced_by, content
+            FROM artifacts WHERE hunt_id = $1 AND kind = 'final'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            hunt_id,
+        )
+        if row is None:
+            return None
+        return {
+            "artifact_id": row["artifact_id"],
+            "hunt_id": row["hunt_id"],
+            "kind": row["kind"],
+            "produced_by": row["produced_by"],
+            "content": row["content"],
+        }
 
     # --- instincts (the Den) -----------------------------------------------------------
 
