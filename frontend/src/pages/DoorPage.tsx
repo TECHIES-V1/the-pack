@@ -4,6 +4,7 @@ import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
+import { DenDrawer } from "@/components/den/DenDrawer";
 import { api } from "@/net/api";
 
 const INSTINCT_CHIPS = [
@@ -45,6 +46,7 @@ export function DoorPage() {
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
       <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-auto">
+        <DenDrawer />
         <header className="sticky top-0 z-10 px-7 py-5 bg-door-bg">
           <motion.span
             initial={{ opacity: 0 }}
