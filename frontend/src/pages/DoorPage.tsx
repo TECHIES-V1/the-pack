@@ -5,7 +5,7 @@ import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
 import { DenDrawer } from "@/components/den/DenDrawer";
-import { api } from "@/net/api";
+import { api, type IntakeTurn } from "@/net/api";
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -30,7 +30,36 @@ export function DoorPage() {
   const [prefill, setPrefill] = useState<string | undefined>();
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
+  const [thread, setThread] = useState<IntakeTurn[]>([]);
+  const [thinking, setThinking] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Front-door clarify-gate: Alpha reads the conversation and only launches a hunt once there's a
+  // real, actionable task. Greetings / vague asks just get a reply — no hunt, no cost.
+  async function handleSend(text: string) {
+    const turns: IntakeTurn[] = [...thread, { role: "user", content: text }];
+    setThread(turns);
+    setThinking(true);
+    try {
+      const { reply, ready, brief } = await api.intake(turns);
+      if (ready) {
+        const { hunt_id } = await api.createHunt({ input: brief || text, source: "typed" });
+        goToPlan(hunt_id);
+        return;
+      }
+      setThread((t) => [...t, { role: "assistant", content: reply }]);
+    } catch {
+      // If Alpha can't be reached, don't trap the Packmaster — open the hunt directly.
+      try {
+        const { hunt_id } = await api.createHunt({ input: text, source: "typed" });
+        goToPlan(hunt_id);
+      } catch {
+        goToPlan(mockHuntId());
+      }
+    } finally {
+      setThinking(false);
+    }
+  }
 
   function showFolderToast() {
     if (folderToastTimer.current) clearTimeout(folderToastTimer.current);
@@ -89,6 +118,34 @@ export function DoorPage() {
               )}
             </AnimatePresence>
 
+            {/* The conversation with Alpha — appears once you've said something */}
+            <AnimatePresence>
+              {(thread.length > 0 || thinking) && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col gap-3 mb-1 max-h-[34vh] overflow-y-auto scrollbar-subtle px-1"
+                >
+                  {thread.map((t, i) =>
+                    t.role === "user" ? (
+                      <div
+                        key={i}
+                        className="bg-[#242424] rounded-xl px-3.5 py-2.5 text-[14px] text-[#e4e4e7] self-end max-w-[80%]"
+                      >
+                        {t.content}
+                      </div>
+                    ) : (
+                      <div key={i} className="text-[14px] leading-relaxed text-[#d4d4d8] max-w-[88%]">
+                        <span className="text-[#e6a23c] font-medium mr-1.5">Alpha</span>
+                        {t.content}
+                      </div>
+                    ),
+                  )}
+                  {thinking && <div className="text-[13px] text-[#71717a] italic">Alpha is thinking…</div>}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <OneBox
               droppedFiles={droppedFiles}
               prefill={prefill}
@@ -98,16 +155,7 @@ export function DoorPage() {
               }}
               onFolderRejected={showFolderToast}
               onRecordingChange={setRecording}
-              onSubmit={async ({ text }) => {
-                // Open a real hunt on the engine, then watch it on the hunt screen. Falls back
-                // to a local id if the backend isn't reachable, so the Door still navigates.
-                try {
-                  const { hunt_id } = await api.createHunt({ input: text, source: "typed" });
-                  goToPlan(hunt_id);
-                } catch {
-                  goToPlan(mockHuntId());
-                }
-              }}
+              onSubmit={({ text }) => handleSend(text)}
             />
 
             <AnimatePresence>
