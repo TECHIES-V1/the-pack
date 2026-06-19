@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Seam + durable store.
     redis_url: str = "redis://localhost:6379/0"
     postgres_url: str = "postgresql://pack:pack@localhost:5432/pack"
+    # Cloud Postgres (ApsaraDB RDS) usually wants TLS. Empty = no TLS (local Docker). Set to a
+    # libpq sslmode — "require" (encrypt, no cert check) or "verify-full" (with a CA) — for prod.
+    postgres_sslmode: str = ""
 
     # App.
     session_secret: str = "change-me-in-prod"
@@ -37,6 +40,21 @@ class Settings(BaseSettings):
 
     # Boundary.
     first_hunt_cap_usd: float = 0.50
+
+    # Pricing — USD per 1M tokens (input, output) per tier. Placeholders in the right ballpark
+    # for Qwen on Model Studio; confirm real numbers when the key lands and override via env.
+    price_max_in_per_m: float = 1.60
+    price_max_out_per_m: float = 6.40
+    price_plus_in_per_m: float = 0.40
+    price_plus_out_per_m: float = 1.20
+    price_flash_in_per_m: float = 0.10
+    price_flash_out_per_m: float = 0.40
+
+    # LLM client resilience.
+    qwen_max_retries: int = 3
+    qwen_backoff_base_s: float = 0.5
+    qwen_breaker_threshold: int = 5  # consecutive failures before the breaker opens
+    qwen_breaker_cooldown_s: float = 30.0
 
 
 settings = Settings()
