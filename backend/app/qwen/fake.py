@@ -30,6 +30,7 @@ _CANNED: dict[str, str] = {
     "merge": "Cross-referenced the scouts' findings; one conflict surfaced for a Hold.",
     "draft": "Drafted the briefing with inline citations to every source.",
     "critique": "Checked every claim carries a source; flagged none missing.",
+    "chat": "Here's where the hunt stands — the pack is on it. Ask me anything.",
 }
 
 
