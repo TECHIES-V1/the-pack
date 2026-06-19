@@ -59,7 +59,7 @@ export function DoorPage() {
       const { reply, ready, brief } = await api.intake(convo);
       if (ready) {
         propose(brief);
-        addAlpha(`Here's the hunt — ${brief} Send the pack?`);
+        addAlpha(reply?.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
       } else {
         addAlpha(reply);
       }
