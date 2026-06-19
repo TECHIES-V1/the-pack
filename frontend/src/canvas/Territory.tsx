@@ -16,10 +16,44 @@ import {
 import { ROLE_COLOR, nodeTypes, type WolfNodeData } from "./WolfNode";
 import { layoutPack } from "./packLayout";
 import type { HuntView, WolfView } from "@/events/reducer";
+import type { WolfRole, WolfStatus } from "@/events/types";
 
 type EdgeState = "dormant" | "flowing" | "blocked";
 
 const ACTIVE = new Set(["hunting", "talking", "thinking"]);
+
+const ROLES: WolfRole[] = ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder"];
+const TIER_BY_ROLE: Record<WolfRole, "max" | "plus" | "flash"> = {
+  alpha: "max", beta: "plus", scout: "flash", tracker: "plus",
+  howler: "plus", sentinel: "max", hunter: "flash", elder: "plus",
+};
+
+function roleFromId(id: string): WolfRole {
+  const base = id.split("-")[0] as WolfRole;
+  return ROLES.includes(base) ? base : "scout";
+}
+
+// Real spawned wolves once the hunt starts; otherwise the PLANNED pack shown idle so the canvas
+// isn't blank during plan review (the wolves come from plan_proposed; alpha/beta lead the pack).
+function displayWolves(view: HuntView): WolfView[] {
+  const real = Object.values(view.wolves);
+  if (real.length) return real;
+  if (!view.plan) return [];
+  const ids = ["alpha", "beta", ...view.plan.wolves];
+  const seen = new Set<string>();
+  return ids
+    .filter((id) => (seen.has(id) ? false : (seen.add(id), true)))
+    .map((id) => {
+      const role = roleFromId(id);
+      return {
+        wolfId: id,
+        role,
+        status: "idle" as WolfStatus,
+        tier: TIER_BY_ROLE[role],
+        thinking: false,
+      };
+    });
+}
 
 function edgeState(from: WolfView | undefined, to: WolfView | undefined): EdgeState {
   if (!from || !to) return "dormant";
@@ -35,7 +69,7 @@ function styleFor(state: EdgeState, color: string): CSSProperties {
 }
 
 function buildGraph(view: HuntView): { nodes: Node[]; edges: Edge[] } {
-  const wolves = Object.values(view.wolves);
+  const wolves = displayWolves(view);
   const byRole = (role: string) => wolves.filter((w) => w.role === role);
   const first = (role: string) => byRole(role)[0];
 
