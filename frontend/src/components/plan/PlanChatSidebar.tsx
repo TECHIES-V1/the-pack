@@ -3,7 +3,7 @@
 // control while running, and a real "Ask Alpha" box. Commands go to the engine; truth returns
 // on the stream.
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { TypeOut } from "@/components/chat/TypeOut";
 import { OneBox } from "@/components/composer/OneBox";
@@ -21,10 +21,17 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
   }, [huntId]);
+
+  // Pin to the newest line by scrolling the rail container itself (never the document root).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, pending, view.feed.length, view.state, view.openHold]);
 
   const hold = view.openHold;
   const resolution = pick ?? hold?.recommended ?? hold?.options[0] ?? "";
@@ -72,7 +79,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle">
         {/* The conversation carried over from the Door (falls back to the task if opened cold) */}
         {turns.length > 0
           ? turns.map((t, i) =>
