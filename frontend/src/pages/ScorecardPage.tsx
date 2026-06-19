@@ -32,7 +32,7 @@ export function ScorecardPage({ huntId }: { huntId: string }) {
       <div className="w-[min(560px,92vw)] bg-[#1A1A1A] border border-[#2a2a2a] rounded-2xl text-white overflow-hidden">
         <header className="flex items-center justify-between px-6 py-4 border-b border-[#2a2a2a]">
           <h1 className="text-[16px] font-medium m-0">Lone Wolf vs The Pack</h1>
-          <button className="text-[#a1a1aa] hover:text-white" onClick={() => goTo(`/artifact/${huntId}`)}>
+          <button className="text-[#a1a1aa] hover:text-white" onClick={() => goTo(`/hunt/${huntId}`)}>
             <LuX size={18} />
           </button>
         </header>
@@ -53,11 +53,23 @@ export function ScorecardPage({ huntId }: { huntId: string }) {
         <footer className="flex justify-end gap-2 px-6 py-4 border-t border-[#2a2a2a]">
           <button
             className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer"
-            onClick={() => goTo(`/artifact/${huntId}`)}
+            onClick={() => goTo(`/hunt/${huntId}`)}
           >
             Cancel
           </button>
-          <button className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer border-none">
+          <button
+            className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer border-none"
+            onClick={() => {
+              const data = { hunt_id: huntId, comparison: ROWS };
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `scorecard-${huntId}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
             Export
           </button>
         </footer>

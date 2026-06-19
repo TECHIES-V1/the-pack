@@ -67,7 +67,7 @@ export function TracksPage({ huntId }: { huntId: string }) {
     <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col">
       <header className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-[#2a2a2a]">
         <h1 className="text-[14px] font-medium m-0">Tracks</h1>
-        <button className="p-2 text-[#a1a1aa] hover:text-white" onClick={() => goTo(`/artifact/${huntId}`)}>
+        <button className="p-2 text-[#a1a1aa] hover:text-white" onClick={() => goTo(`/hunt/${huntId}`)}>
           <LuX size={16} />
         </button>
       </header>
