@@ -74,10 +74,20 @@ export interface FinalArtifact {
   produced_by: string | null;
   content: Record<string, unknown> | null;
 }
+export interface IntakeTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+export interface IntakeReply {
+  reply: string;
+  ready: boolean;
+  brief: string;
+}
 
 // --- the surface -----------------------------------------------------------------------
 
 export const api = {
+  intake: (messages: IntakeTurn[]) => post<IntakeReply>("/hunts/intake", { messages }),
   createHunt: (body: CreateHuntBody) => post<HuntCreated>("/hunts", body),
   listHunts: () => req<{ hunts: HuntListItem[] }>("/hunts"),
   getHunt: (id: string) => req<HuntSnapshot>(`/hunts/${id}`),
