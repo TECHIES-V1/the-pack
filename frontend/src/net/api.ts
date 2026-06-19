@@ -39,6 +39,7 @@ export interface HuntSnapshot {
   hunt_id: string;
   state: string;
   last_seq: number;
+  task: string;
 }
 export interface ApprovePlanBody {
   mode: "wild" | "on_signal" | "on_command";
@@ -85,6 +86,8 @@ export const api = {
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
   resolveHold: (id: string, holdId: string, body: ResolveHoldBody) =>
     post<CommandAccepted>(`/hunts/${id}/holds/${holdId}/resolve`, body),
+  ask: (id: string, question: string) =>
+    post<{ reply: string }>(`/hunts/${id}/ask`, { question }),
   addInput: (id: string) => post<CommandAccepted>(`/hunts/${id}/inputs`),
   stop: (id: string) => post<CommandAccepted>(`/hunts/${id}/stop`),
   resume: (id: string, boundary_usd: number) =>
