@@ -158,20 +158,32 @@ class IntakeBody(BaseModel):
 # The clarify-gate prompt (research-backed: clarify → confirm → run). Alpha decides if there is a
 # real, actionable task yet; otherwise he just talks. Strictly on-voice (Doc 02 §08).
 _ALPHA_INTAKE = (
-    "You are Alpha, leader of the Pack, meeting the Packmaster at the door. Decide whether "
-    "there is a task the Pack can go and work on yet. Respond ONLY with a JSON object: "
+    "You are Alpha, leader of the Pack — a warm, capable assistant talking with the Packmaster. "
+    "Hold a normal conversation: answer questions, explain yourself, think things through, chat — "
+    "just like a helpful AI assistant. Respond with ONLY a JSON object, no prose around it: "
     '{"reply": string, "ready": boolean, "brief": string}.\n'
-    "Set ready=true whenever the message names a goal the Pack can act on — research, a draft, a "
-    "review, a summary, an analysis — even if some details are loose (the Pack fills small gaps "
-    "itself). Then brief = one crisp sentence naming the task, and reply = a short, warm 'on it' "
-    "line.\n"
-    "Set ready=false ONLY when there is no real task yet: a greeting, small talk, venting, or a "
-    "fragment so bare you cannot tell what they want done. Then reply with a warm one-line nudge "
-    'toward a goal, OR ask exactly ONE short question, and brief = "".\n'
-    "Never ask more than one question. If your reply says you will do something, ready MUST be "
-    "true. Plain English, present tense, no jargon.\n"
-    'Examples:\nUser: "hi" → {"reply": "Hey — what do you want the Pack to hunt down?", '
+    "- reply: what you actually say back. Always natural and helpful, answering what they really "
+    "said. Do NOT keep pushing them to 'name a task'. Plain English, present tense, no jargon, "
+    "1-4 sentences.\n"
+    "- ready: true whenever they ask you to find, research, look up, gather, compare, write, "
+    "draft, review, summarize, analyze, or dig something up — anything that needs real work or "
+    "looking things up. Set ready=true even if it needs current or web information: the Pack does "
+    "the looking, so NEVER decline such a request for lack of data or because it's in the future. "
+    "Then brief = one crisp sentence naming the job, and reply = a short, warm 'on it' line.\n"
+    '- otherwise ready=false and brief="" — greetings, questions about you, general chat, thinking '
+    "out loud, and simple facts you can answer in a sentence or two (then just answer). Talk "
+    "naturally.\n"
+    "If your reply says you'll go do something now, ready MUST be true.\n"
+    'Examples:\nUser: "hi" → {"reply": "Hey — I\'m Alpha. What\'s on your mind?", '
     '"ready": false, "brief": ""}\n'
+    'User: "who are you?" → {"reply": "I\'m Alpha, the lead of the Pack — think of me as your '
+    "point person. You talk to me, and when there's something to look into, write, or sort out, "
+    'I send the team after it. Ask me anything.", "ready": false, "brief": ""}\n'
+    'User: "what is the capital of France?" → {"reply": "Paris. Want me to dig into anything '
+    'about it?", "ready": false, "brief": ""}\n'
+    'User: "find me the top 5 AI coding tools and compare them" → {"reply": "On it — I\'ll have '
+    'the Pack find the leading AI coding tools and put them head-to-head.", "ready": true, '
+    '"brief": "Find the top AI coding tools and compare them."}\n'
     'User: "research the BNPL market in Nigeria and write me a brief" → {"reply": "On it — '
     'I\'ll dig into Nigeria\'s BNPL market and bring you a brief.", "ready": true, "brief": '
     '"Research the BNPL market in Nigeria and write a brief."}'
@@ -198,17 +210,43 @@ _GREETINGS = {
 }
 
 
+_QUESTION_STARTS = {
+    "who", "what", "why", "how", "when", "where", "which", "can",
+    "could", "do", "does", "is", "are", "should", "would", "will",
+}
+
+
 def _looks_like_task(text: str) -> bool:
-    """Offline heuristic for the clarify-gate when there's no model: a greeting or a one/two-word
-    fragment isn't a task; anything more substantial is treated as actionable."""
-    t = text.strip().lower().rstrip("!.?")
-    if not t or t in _GREETINGS:
+    """Offline heuristic for the clarify-gate when there's no model: greetings, questions, and bare
+    fragments aren't tasks; a longer imperative is treated as actionable. (Degraded no-key path —
+    the live model does the real judging.)"""
+    raw = text.strip()
+    t = raw.lower().rstrip("!.?")
+    if not t or t in _GREETINGS or raw.endswith("?"):
         return False
-    return len(t.split()) >= 3
+    words = t.split()
+    if words[0] in _QUESTION_STARTS:
+        return False
+    return len(words) >= 3
 
 
 def _last_user(messages: list[dict]) -> str:
     return next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+
+
+def _parse_intake(text: str) -> dict | None:
+    """Pull the intake JSON out of the model's reply, tolerating a stray ```fence or prose around
+    it. Returns None if there's no usable object — callers MUST NOT launch on a None."""
+    if text.startswith("```"):
+        text = text.strip("`").split("\n", 1)[-1]
+    for candidate in (text, text[text.find("{") : text.rfind("}") + 1] if "{" in text else ""):
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict) and "ready" in obj:
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 # Alpha's CHAT voice — deliberately NOT the internal orchestrator prompt (that one is full of
@@ -314,12 +352,16 @@ async def intake(body: IntakeBody, request: Request) -> JSONResponse:
     if client.offline:
         if _looks_like_task(last):
             return JSONResponse(
-                {"reply": "On it — lining up the pack.", "ready": True, "brief": last.strip()[:200]}
+                {
+                    "reply": "On it — I'll get the Pack on that.",
+                    "ready": True,
+                    "brief": last.strip()[:200],
+                }
             )
         return JSONResponse(
             {
-                "reply": "Hey — I'm Alpha. What should the pack hunt down?"
-                " Research, a draft, going through a file…",
+                "reply": "I'm Alpha — I lead the Pack. Ask me anything, or tell me what you'd"
+                " like looked into, written, or sorted.",
                 "ready": False,
                 "brief": "",
             }
@@ -335,24 +377,18 @@ async def intake(body: IntakeBody, request: Request) -> JSONResponse:
         )
     )
     text = (result.text or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").split("\n", 1)[-1]  # drop a leading ```json fence
-    try:
-        parsed = json.loads(text)
+    parsed = _parse_intake(text)
+    if parsed is not None:
         reply = (
             str(parsed.get("reply") or "").strip() or "Tell me what you want the pack to hunt down."
         )
         ready = bool(parsed.get("ready"))
         brief = str(parsed.get("brief") or "").strip()
-    except (json.JSONDecodeError, AttributeError):
-        # Model didn't return clean JSON — fall back to the heuristic, keep the door usable.
-        ready = _looks_like_task(last)
-        brief = last.strip()[:200] if ready else ""
-        reply = (
-            "On it — lining up the pack."
-            if ready
-            else (text[:300] or "What should the pack hunt down?")
-        )
+    else:
+        # No usable JSON — treat the model's words as a normal reply and NEVER launch on a miss.
+        reply = text or "Tell me what you want the pack to hunt down."
+        ready = False
+        brief = ""
     if ready and not brief:
         brief = last.strip()[:200]
     return JSONResponse({"reply": reply, "ready": ready, "brief": brief})
