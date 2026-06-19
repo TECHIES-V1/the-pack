@@ -9,23 +9,18 @@ import { TypeOut } from "@/components/chat/TypeOut";
 import { OneBox } from "@/components/composer/OneBox";
 import { api } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
+import { useChatStore } from "@/store/chatStore";
 
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
 const RUNNING = new Set(["hunting", "holding", "standoff", "finishing"]);
 
-interface Msg {
-  who: "you" | "alpha";
-  text: string;
-}
-
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
+  const { turns, pending, addUser, addAlpha, setPending } = useChatStore();
   const [task, setTask] = useState("");
-  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
@@ -44,15 +39,15 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   }
 
   async function askAlpha(question: string) {
-    setMsgs((m) => [...m, { who: "you", text: question }]);
-    setAsking(true);
+    addUser(question);
+    setPending(true);
     try {
       const { reply } = await api.ask(huntId, question);
-      setMsgs((m) => [...m, { who: "alpha", text: reply }]);
+      addAlpha(reply);
     } catch {
-      setMsgs((m) => [...m, { who: "alpha", text: "I couldn't reach you just now — try me again." }]);
+      addAlpha("I couldn't reach you just now — try me again.");
     } finally {
-      setAsking(false);
+      setPending(false);
     }
   }
 
@@ -78,9 +73,35 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle">
-        {task && (
-          <div className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
-            {task}
+        {/* The conversation carried over from the Door (falls back to the task if opened cold) */}
+        {turns.length > 0
+          ? turns.map((t, i) =>
+              t.role === "user" ? (
+                <div
+                  key={i}
+                  className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]"
+                >
+                  {t.text}
+                </div>
+              ) : (
+                <div key={i} className="flex gap-2 items-start">
+                  <AlphaAvatar size={22} />
+                  <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0 pt-px">
+                    <TypeOut text={t.text} />
+                  </p>
+                </div>
+              ),
+            )
+          : task && (
+              <div className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
+                {task}
+              </div>
+            )}
+
+        {pending && (
+          <div className="flex gap-2 items-center">
+            <AlphaAvatar size={22} />
+            <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
           </div>
         )}
 
@@ -93,28 +114,6 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
             <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0">{line.text}</p>
           </div>
         ))}
-
-        {msgs.map((m, i) =>
-          m.who === "you" ? (
-            <div key={i} className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
-              {m.text}
-            </div>
-          ) : (
-            <div key={i} className="flex gap-2 items-start">
-              <AlphaAvatar size={22} />
-              <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0 pt-px">
-                <TypeOut text={m.text} />
-              </p>
-            </div>
-          ),
-        )}
-
-        {asking && (
-          <div className="flex gap-2 items-center">
-            <AlphaAvatar size={22} />
-            <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-          </div>
-        )}
 
         {view.state === "plan_ready" && view.plan && (
           <div className={`${PANEL} p-4 flex flex-col gap-3`}>

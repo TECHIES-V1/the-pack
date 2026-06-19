@@ -15,6 +15,7 @@ import { TracksPage } from "@/pages/TracksPage";
 import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { useHuntStore } from "@/store/huntStore";
+import { useChatStore } from "@/store/chatStore";
 import { StreamClient } from "@/net/streamClient";
 
 type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery";
@@ -53,6 +54,11 @@ export default function App() {
     if (!id || connectedRef.current === id) return;
     clientRef.current?.close();
     useHuntStore.getState().reset();
+    // Keep the conversation across Door → plan (same hunt); start fresh for a different hunt.
+    if (useChatStore.getState().huntId !== id) {
+      useChatStore.getState().reset();
+      useChatStore.getState().bindHunt(id);
+    }
     const client = new StreamClient(id, {
       onEvent: (ev) => useHuntStore.getState().apply(ev),
       getResumeSeq: () => useHuntStore.getState().view.lastSeq,
