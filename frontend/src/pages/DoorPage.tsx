@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
@@ -8,6 +8,7 @@ import { DenDrawer } from "@/components/den/DenDrawer";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { TypeOut } from "@/components/chat/TypeOut";
 import { api, type IntakeTurn } from "@/net/api";
+import { useChatStore } from "@/store/chatStore";
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -32,35 +33,59 @@ export function DoorPage() {
   const [prefill, setPrefill] = useState<string | undefined>();
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
-  const [thread, setThread] = useState<IntakeTurn[]>([]);
-  const [thinking, setThinking] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Front-door clarify-gate: Alpha reads the conversation and only launches a hunt once there's a
-  // real, actionable task. Greetings / vague asks just get a reply — no hunt, no cost.
+  const { turns, pending, proposal, addUser, addAlpha, setPending, propose, clearProposal, bindHunt } =
+    useChatStore();
+  const chatting = turns.length > 0 || pending;
+
+  // Keep the newest message in view as the conversation grows.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, pending, proposal]);
+
+  // Front-door clarify-gate: Alpha reads the conversation and only PROPOSES a hunt once there's a
+  // real, actionable task. Nothing launches until the Packmaster confirms (see confirmSend).
   async function handleSend(text: string) {
-    const turns: IntakeTurn[] = [...thread, { role: "user", content: text }];
-    setThread(turns);
-    setThinking(true);
+    const convo: IntakeTurn[] = [...turns, { role: "user" as const, text }].map((t) => ({
+      role: t.role === "alpha" ? "assistant" : "user",
+      content: t.text,
+    }));
+    addUser(text);
+    clearProposal();
+    setPending(true);
     try {
-      const { reply, ready, brief } = await api.intake(turns);
+      const { reply, ready, brief } = await api.intake(convo);
       if (ready) {
-        const { hunt_id } = await api.createHunt({ input: brief || text, source: "typed" });
-        goToPlan(hunt_id);
-        return;
+        propose(brief);
+        addAlpha(`Here's the hunt — ${brief} Send the pack?`);
+      } else {
+        addAlpha(reply);
       }
-      setThread((t) => [...t, { role: "assistant", content: reply }]);
     } catch {
-      // If Alpha can't be reached, don't trap the Packmaster — open the hunt directly.
-      try {
-        const { hunt_id } = await api.createHunt({ input: text, source: "typed" });
-        goToPlan(hunt_id);
-      } catch {
-        goToPlan(mockHuntId());
-      }
+      addAlpha("I couldn't reach you just now — try me again.");
     } finally {
-      setThinking(false);
+      setPending(false);
     }
+  }
+
+  async function confirmSend() {
+    if (!proposal) return;
+    const brief = proposal.brief;
+    clearProposal();
+    try {
+      const { hunt_id } = await api.createHunt({ input: brief, source: "typed" });
+      bindHunt(hunt_id);
+      goToPlan(hunt_id);
+    } catch {
+      goToPlan(mockHuntId());
+    }
+  }
+
+  function adjust() {
+    clearProposal();
+    addAlpha("No problem — what should I change?");
   }
 
   function showFolderToast() {
@@ -74,11 +99,26 @@ export function DoorPage() {
     if (files.length > 0) setAlphaFile(files[0]);
   }
 
+  const composer = (
+    <OneBox
+      droppedFiles={droppedFiles}
+      prefill={prefill}
+      placeholder={chatting ? "Talk to Alpha…" : "What should the pack hunt down?"}
+      onFilesAdded={(files) => setAlphaFile(files[0])}
+      onFileRemoved={(name) => {
+        if (alphaFile?.name === name) setAlphaFile(null);
+      }}
+      onFolderRejected={showFolderToast}
+      onRecordingChange={setRecording}
+      onSubmit={({ text }) => handleSend(text)}
+    />
+  );
+
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
-      <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-auto">
+      <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
         <DenDrawer />
-        <header className="sticky top-0 z-10 px-7 py-5 bg-door-bg">
+        <header className="shrink-0 px-7 py-5 bg-door-bg">
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -89,123 +129,131 @@ export function DoorPage() {
           </motion.span>
         </header>
 
-        <main className="flex-1 flex flex-col items-center justify-center px-4 pb-[8vh]">
-          <motion.h1
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
-            className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-10 md:mb-16"
-          >
-            What should the pack hunt down?
-          </motion.h1>
-
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1, ease: [0.2, 0.8, 0.2, 1] }}
-            className="w-[min(880px,90vw)] flex flex-col gap-2"
-          >
-            {/* Folder rejection toast */}
-            <AnimatePresence>
-              {folderToast && (
-                <motion.p
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.2 }}
-                  className="text-[12px] text-amber-400 m-0 px-1"
-                >
-                  Folders can't be added — only files are supported.
-                </motion.p>
+        {chatting ? (
+          /* ---------- Chat surface: transcript fills the space, composer pinned below ---------- */
+          <main className="flex-1 min-h-0 flex flex-col items-center px-4 pb-6">
+            <div className="w-[min(760px,92vw)] flex-1 min-h-0 overflow-y-auto scrollbar-subtle flex flex-col gap-4 py-6">
+              {turns.map((t, i) =>
+                t.role === "user" ? (
+                  <div
+                    key={i}
+                    className="bg-[#242424] rounded-2xl px-4 py-2.5 text-[14px] text-[#e4e4e7] self-end max-w-[80%]"
+                  >
+                    {t.text}
+                  </div>
+                ) : (
+                  <div key={i} className="flex gap-2.5 items-start max-w-[88%]">
+                    <AlphaAvatar />
+                    <p className="text-[14px] leading-relaxed text-[#d4d4d8] m-0 pt-0.5">
+                      <TypeOut text={t.text} />
+                    </p>
+                  </div>
+                ),
               )}
-            </AnimatePresence>
 
-            {/* The conversation with Alpha — appears once you've said something */}
-            <AnimatePresence>
-              {(thread.length > 0 || thinking) && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex flex-col gap-3 mb-1 max-h-[34vh] overflow-y-auto scrollbar-subtle px-1"
-                >
-                  {thread.map((t, i) =>
-                    t.role === "user" ? (
-                      <div
-                        key={i}
-                        className="bg-[#242424] rounded-xl px-3.5 py-2.5 text-[14px] text-[#e4e4e7] self-end max-w-[80%]"
-                      >
-                        {t.content}
-                      </div>
-                    ) : (
-                      <div key={i} className="flex gap-2.5 items-start max-w-[88%]">
-                        <AlphaAvatar />
-                        <p className="text-[14px] leading-relaxed text-[#d4d4d8] m-0 pt-0.5">
-                          <TypeOut text={t.content} />
-                        </p>
-                      </div>
-                    ),
-                  )}
-                  {thinking && (
-                    <div className="flex gap-2.5 items-center">
-                      <AlphaAvatar />
-                      <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-                    </div>
-                  )}
-                </motion.div>
+              {pending && (
+                <div className="flex gap-2.5 items-center">
+                  <AlphaAvatar />
+                  <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
+                </div>
               )}
-            </AnimatePresence>
 
-            <OneBox
-              droppedFiles={droppedFiles}
-              prefill={prefill}
-              onFilesAdded={(files) => setAlphaFile(files[0])}
-              onFileRemoved={(name) => {
-                if (alphaFile?.name === name) setAlphaFile(null);
-              }}
-              onFolderRejected={showFolderToast}
-              onRecordingChange={setRecording}
-              onSubmit={({ text }) => handleSend(text)}
-            />
-
-            <AnimatePresence>
-              {alphaFile && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <AlphaReactionSheet
-                    file={alphaFile}
-                    onDismiss={() => setAlphaFile(null)}
-                    onAction={(_action: string) => {
-                      setAlphaFile(null);
-                      goToPlan(mockHuntId());
-                    }}
-                  />
-                </motion.div>
+              {/* The confirm beat — nothing launches until the Packmaster clicks */}
+              {proposal && (
+                <div className="flex gap-2.5 self-start ml-[34px]">
+                  <button
+                    onClick={confirmSend}
+                    className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 cursor-pointer border-none"
+                  >
+                    Send the pack →
+                  </button>
+                  <button
+                    onClick={adjust}
+                    className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer hover:text-white"
+                  >
+                    Adjust
+                  </button>
+                </div>
               )}
-            </AnimatePresence>
 
-            {/* Chips — horizontal scroll on mobile, row on desktop */}
+              <div ref={bottomRef} />
+            </div>
+
+            <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
+          </main>
+        ) : (
+          /* ---------- Empty state: the hero (heading + composer + chips) ---------- */
+          <main className="flex-1 flex flex-col items-center justify-center px-4 pb-[8vh] overflow-auto">
+            <motion.h1
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+              className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-10 md:mb-16"
+            >
+              What should the pack hunt down?
+            </motion.h1>
+
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-              className="flex gap-3 overflow-x-auto pb-1 scrollbar-none"
+              transition={{ duration: 0.5, delay: 0.1, ease: [0.2, 0.8, 0.2, 1] }}
+              className="w-[min(880px,90vw)] flex flex-col gap-2"
             >
-              {INSTINCT_CHIPS.map((chip) => (
-                <InstinctChip
-                  key={chip.title}
-                  title={chip.title}
-                  subtitle={chip.subtitle}
-                  onClick={() => setPrefill(chip.title)}
-                  disabled={recording}
-                />
-              ))}
+              <AnimatePresence>
+                {folderToast && (
+                  <motion.p
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.2 }}
+                    className="text-[12px] text-amber-400 m-0 px-1"
+                  >
+                    Folders can't be added — only files are supported.
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              {composer}
+
+              <AnimatePresence>
+                {alphaFile && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <AlphaReactionSheet
+                      file={alphaFile}
+                      onDismiss={() => setAlphaFile(null)}
+                      onAction={(_action: string) => {
+                        setAlphaFile(null);
+                        goToPlan(mockHuntId());
+                      }}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                className="flex gap-3 overflow-x-auto pb-1 scrollbar-none"
+              >
+                {INSTINCT_CHIPS.map((chip) => (
+                  <InstinctChip
+                    key={chip.title}
+                    title={chip.title}
+                    subtitle={chip.subtitle}
+                    onClick={() => setPrefill(chip.title)}
+                    disabled={recording}
+                  />
+                ))}
+              </motion.div>
             </motion.div>
-          </motion.div>
-        </main>
+          </main>
+        )}
       </div>
     </DropHalo>
   );
