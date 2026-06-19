@@ -29,7 +29,9 @@ from app.engine.ids import new_hunt_id, new_instinct_id
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
 from app.engine.supervisor import Supervisor
+from app.prompts import load_prompt
 from app.qwen.client import QwenClient
+from app.qwen.types import CallSpec
 
 
 @asynccontextmanager
@@ -141,6 +143,11 @@ class HuntSnapshot(BaseModel):
     hunt_id: str
     state: str
     last_seq: int
+    task: str = ""
+
+
+class AskAlpha(BaseModel):
+    question: str
 
 
 class CommandAccepted(BaseModel):
@@ -197,7 +204,12 @@ async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
     if snap is None:
         return JSONResponse(status_code=404, content={"detail": "hunt not found"})
     return JSONResponse(
-        content={"hunt_id": snap["hunt_id"], "state": snap["state"], "last_seq": snap["last_seq"]}
+        content={
+            "hunt_id": snap["hunt_id"],
+            "state": snap["state"],
+            "last_seq": snap["last_seq"],
+            "task": snap["raw_input"],
+        }
     )
 
 
@@ -218,6 +230,31 @@ async def approve_plan(hunt_id: str, body: ApprovePlan, request: Request) -> JSO
     if not ok:
         return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
     return _accepted({"hunt_id": hunt_id, "accepted": True})
+
+
+@app.post("/hunts/{hunt_id}/ask", tags=["hunts"])
+async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONResponse:
+    """A side question to Alpha about the hunt — a one-shot model call (NOT event-sourced).
+    Offline this returns FakeQwen's canned reply, so the chat works with no key too."""
+    snap = await _repo(request).get_hunt_snapshot(hunt_id)
+    task = (snap or {}).get("raw_input", "")
+    client: QwenClient = request.app.state.client
+    result = await client.complete(
+        CallSpec(
+            hunt_id=hunt_id,
+            wolf_id="alpha",
+            tier="plus",
+            intent="chat",
+            messages=[
+                {"role": "system", "content": load_prompt("alpha").body},
+                {
+                    "role": "user",
+                    "content": f"The hunt: {task}\n\nThe Packmaster asks: {body.question}",
+                },
+            ],
+        )
+    )
+    return JSONResponse(content={"reply": result.text})
 
 
 @app.post(
