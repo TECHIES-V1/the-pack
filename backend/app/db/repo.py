@@ -55,7 +55,7 @@ class Repo:
     async def get_hunt_snapshot(self, hunt_id: str) -> dict[str, Any] | None:
         """State + last_seq, or None if the hunt does not exist (REST returns 404)."""
         row = await self._pool.fetchrow(
-            "SELECT hunt_id, state, source, boundary_usd FROM hunts WHERE hunt_id = $1",
+            "SELECT hunt_id, state, source, raw_input, boundary_usd FROM hunts WHERE hunt_id = $1",
             hunt_id,
         )
         if row is None:
@@ -64,6 +64,7 @@ class Repo:
             "hunt_id": row["hunt_id"],
             "state": row["state"],
             "source": row["source"],
+            "raw_input": row["raw_input"] or "",
             "boundary_usd": row["boundary_usd"],
             "last_seq": await self.get_last_seq(hunt_id),
         }
