@@ -1,47 +1,52 @@
-// Chat session (right rail of the hunt screen, Doc 02/03). Renders ONLY from the hunt store:
-// Alpha's narration, the spend meter, the Hunt Summary (Start Hunt = approve), the Hold card
-// (Submit = resolve), and the final artifact card. Commands go to the engine; truth comes back
+// Chat session (right rail). Renders from the hunt store: the task, Alpha's narration, the
+// spend meter, the Hunt Summary (Start Hunt = approve), the Hold card (Submit = resolve), a Stop
+// control while running, and a real "Ask Alpha" box. Commands go to the engine; truth returns
 // on the stream.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { OneBox } from "@/components/composer/OneBox";
 import { api } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 
-function goTo(path: string) {
-  window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
+const RUNNING = new Set(["hunting", "holding", "standoff", "finishing"]);
+
+interface Msg {
+  who: "you" | "alpha";
+  text: string;
+}
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
-  const [asks, setAsks] = useState<string[]>([]);
+  const [task, setTask] = useState("");
+  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
+  }, [huntId]);
+
   const hold = view.openHold;
   const resolution = pick ?? hold?.recommended ?? hold?.options[0] ?? "";
 
-  async function startHunt() {
+  async function guard(fn: () => Promise<unknown>) {
     setBusy(true);
     try {
-      await api.approvePlan(huntId, { mode: "on_signal", boundary_usd: boundary });
+      await fn();
     } finally {
       setBusy(false);
     }
   }
 
-  async function resolveHold() {
-    if (!hold) return;
-    setBusy(true);
+  async function askAlpha(question: string) {
+    setMsgs((m) => [...m, { who: "you", text: question }]);
     try {
-      await api.resolveHold(huntId, hold.holdId, { resolution });
-      setPick(null);
-    } finally {
-      setBusy(false);
+      const { reply } = await api.ask(huntId, question);
+      setMsgs((m) => [...m, { who: "alpha", text: reply }]);
+    } catch {
+      setMsgs((m) => [...m, { who: "alpha", text: "(couldn't reach Alpha just now)" }]);
     }
   }
 
@@ -49,15 +54,30 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     <aside className="w-[340px] shrink-0 flex flex-col bg-[#1A1A1A] text-white overflow-hidden m-2 rounded-[12px] border border-[#2a2a2a]">
       <div className="px-5 pt-5 pb-4 border-b border-[#2a2a2a] flex items-center justify-between">
         <h2 className="text-[14px] font-medium m-0 leading-none">Chat session</h2>
-        {view.boundary.boundaryUsd > 0 && (
-          <span className="text-[11px] text-[#a1a1aa]">
-            ${view.boundary.cumulativeUsd.toFixed(2)} spent · {view.boundary.pct.toFixed(0)}%
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {view.boundary.boundaryUsd > 0 && (
+            <span className="text-[11px] text-[#a1a1aa]">
+              ${view.boundary.cumulativeUsd.toFixed(2)} · {view.boundary.pct.toFixed(0)}%
+            </span>
+          )}
+          {RUNNING.has(view.state) && (
+            <button
+              onClick={() => guard(() => api.stop(huntId))}
+              className="text-[11px] text-[#e03a2f] hover:text-[#ff6b5e] bg-transparent border-none cursor-pointer p-0"
+            >
+              Stop
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle">
-        {/* Alpha's narration */}
+        {task && (
+          <div className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
+            {task}
+          </div>
+        )}
+
         {view.feed.map((line) => (
           <div key={line.seq} className="text-[13px] leading-relaxed text-[#d4d4d8]">
             <span className="text-[#71717a] mr-1">·</span>
@@ -65,14 +85,19 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           </div>
         ))}
 
-        {/* User asks (local echo — no chat backend yet) */}
-        {asks.map((m, i) => (
-          <div key={`ask-${i}`} className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
-            {m}
-          </div>
-        ))}
+        {msgs.map((m, i) =>
+          m.who === "you" ? (
+            <div key={i} className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]">
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="text-[13px] leading-relaxed text-[#e6a23c]">
+              <span className="mr-1">Alpha:</span>
+              {m.text}
+            </div>
+          ),
+        )}
 
-        {/* Hunt Summary — the approve gate */}
         {view.state === "plan_ready" && view.plan && (
           <div className={`${PANEL} p-4 flex flex-col gap-3`}>
             <h3 className="text-[13px] font-medium m-0">Hunt Summary</h3>
@@ -93,35 +118,29 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               />
             </label>
             <button
-              onClick={startHunt}
+              onClick={() => guard(() => api.approvePlan(huntId, { mode: "on_signal", boundary_usd: boundary }))}
               disabled={busy}
               className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none"
             >
-              Start Hunt →
+              Send the pack →
             </button>
           </div>
         )}
 
-        {/* Hold — human decision */}
         {hold && (
           <div className={`${PANEL} p-4 flex flex-col gap-3`}>
             <h3 className="text-[13px] font-medium m-0">{hold.question}</h3>
             <div className="flex flex-col gap-2">
               {hold.options.map((opt) => (
                 <label key={opt} className="flex items-center gap-2 text-[12px] text-[#d4d4d8] cursor-pointer">
-                  <input
-                    type="radio"
-                    name="hold"
-                    checked={resolution === opt}
-                    onChange={() => setPick(opt)}
-                  />
+                  <input type="radio" name="hold" checked={resolution === opt} onChange={() => setPick(opt)} />
                   {opt}
                   {opt === hold.recommended && <span className="text-[#71717a]">(recommended)</span>}
                 </label>
               ))}
             </div>
             <button
-              onClick={resolveHold}
+              onClick={() => guard(() => api.resolveHold(huntId, hold.holdId, { resolution }).then(() => setPick(null)))}
               disabled={busy}
               className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none self-end"
             >
@@ -130,27 +149,6 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           </div>
         )}
 
-        {/* Final artifact */}
-        {view.finalArtifactId && (
-          <div className={`${PANEL} p-4 flex flex-col gap-3`}>
-            <div className="flex items-center gap-2 text-[13px]">
-              <span className="text-[#e03a2f]">▌</span> Verification claim
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => goTo(`/artifact/${huntId}`)}
-                className="bg-white text-black rounded-lg px-3 py-1.5 text-[12px] font-medium cursor-pointer border-none"
-              >
-                Open
-              </button>
-              <button className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-[12px] cursor-pointer">
-                Save instinct
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Failed */}
         {view.state === "failed" && (
           <div className="text-[13px] text-[#e03a2f]">The pack couldn't finish this one.</div>
         )}
@@ -159,7 +157,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       <div className="p-4 pt-2">
         <OneBox
           placeholder="Ask Alpha anything about this plan..."
-          onSubmit={(payload) => setAsks((prev) => [...prev, payload.text])}
+          onSubmit={(payload) => askAlpha(payload.text)}
         />
       </div>
     </aside>
