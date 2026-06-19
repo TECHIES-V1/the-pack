@@ -1,0 +1,41 @@
+# Pack — production stack (engine + gateway + web/nginx) for one ECS box.
+# Postgres and Redis are MANAGED services (ApsaraDB RDS + Tair) reached via .env.prod —
+# they are NOT containers here.
+#
+#   cd deploy
+#   cp .env.prod.example .env.prod   # then fill in the real values
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Build contexts are the repo root (..) so gateway/ and backend/ are used as-is, untouched.
+
+services:
+  engine:
+    build:
+      context: ..
+      dockerfile: deploy/engine.Dockerfile
+    env_file: [.env.prod]
+    expose: ["8000"]
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/gateway.Dockerfile
+    env_file: [.env.prod] # reads REDIS_URL; ignores the rest
+    environment:
+      GATEWAY_PORT: "8080"
+    expose: ["8080"]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        VITE_ENGINE_URL: /api
+        VITE_GATEWAY_WS_URL: /ws
+    ports:
+      - "80:80"
+      # - "443:443"   # enable after you add TLS (see DEPLOY.md)
+    depends_on: [engine, gateway]
+    restart: unless-stopped
