@@ -7,11 +7,13 @@ import { useEffect, useRef, useState } from "react";
 import { DoorPage } from "@/pages/DoorPage";
 import { PlanPage } from "@/pages/PlanPage";
 import { ArtifactPage } from "@/pages/ArtifactPage";
+import { TracksPage } from "@/pages/TracksPage";
+import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { useHuntStore } from "@/store/huntStore";
 import { StreamClient } from "@/net/streamClient";
 
-type View = "door" | "plan" | "artifact" | "gallery";
+type View = "door" | "plan" | "artifact" | "tracks" | "scorecard" | "gallery";
 
 interface Route {
   view: View;
@@ -22,6 +24,8 @@ function parseRoute(): Route {
   const path = window.location.pathname.replace(/^\//, "");
   if (path.startsWith("plan/")) return { view: "plan", huntId: path.slice("plan/".length) };
   if (path.startsWith("artifact/")) return { view: "artifact", huntId: path.slice("artifact/".length) };
+  if (path.startsWith("tracks/")) return { view: "tracks", huntId: path.slice("tracks/".length) };
+  if (path.startsWith("scorecard/")) return { view: "scorecard", huntId: path.slice("scorecard/".length) };
   if (path === "gallery") return { view: "gallery", huntId: null };
   return { view: "door", huntId: null };
 }
@@ -55,5 +59,7 @@ export default function App() {
   if (route.view === "door") return <DoorPage />;
   if (route.view === "plan") return <PlanPage />;
   if (route.view === "artifact") return <ArtifactPage huntId={route.huntId ?? ""} />;
+  if (route.view === "tracks") return <TracksPage huntId={route.huntId ?? ""} />;
+  if (route.view === "scorecard") return <ScorecardPage huntId={route.huntId ?? ""} />;
   return <StatesGallery />;
 }
