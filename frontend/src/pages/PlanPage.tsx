@@ -1,40 +1,12 @@
-import { useEffect } from "react";
+// The hunt screen — one dark, 3-column view that animates plan → running → done (Doc 02/03):
+//   The Pack (left) · the Territory canvas (center) · Chat session (right).
+// Renders live from the hunt store; the stream is connected in App for /plan/:hunt_id.
+
 import { PlanSidebar } from "@/components/plan/PlanSidebar";
 import { PlanChatSidebar } from "@/components/plan/PlanChatSidebar";
+import { Territory } from "@/canvas/Territory";
 import { useHuntStore } from "@/store/huntStore";
-
-// Minimal fixture stream: just enough to reach plan_ready.
-const PLAN_STREAM = [
-  {
-    event_id: "evt_p0",
-    hunt_id: "demo",
-    seq: 0,
-    ts: new Date().toISOString(),
-    type: "hunt_created" as const,
-    actor: "user",
-    payload: { source: "typed", raw_input_ref: "art_demo" },
-  },
-  {
-    event_id: "evt_p1",
-    hunt_id: "demo",
-    seq: 1,
-    ts: new Date().toISOString(),
-    type: "plan_proposed" as const,
-    actor: "beta",
-    payload: {
-      steps: [
-        { step_id: "s1", summary: "Range for BNPL market players", wolves: ["scout-1", "scout-2", "scout-3"] },
-        { step_id: "s2", summary: "Cross-reference and extract claims", wolves: ["tracker"] },
-        { step_id: "s3", summary: "Draft the briefing with citations", wolves: ["howler"] },
-      ],
-      wolves: ["scout-1", "scout-2", "scout-3", "tracker", "sentinel", "howler"],
-      pattern: "parallel_then_merge",
-      assumptions: ["consumer BNPL", "2024 to 2026", "briefing doc"],
-      est_cost: 0.60,
-      est_time: 210,
-    },
-  },
-];
+import type { PlanView } from "@/events/reducer";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
@@ -42,43 +14,25 @@ function goTo(path: string) {
 }
 
 export function PlanPage() {
-  const huntId = window.location.pathname.split("/plan/")[1] ?? "unknown";
-  const { view, applyMany, reset } = useHuntStore();
-
-  useEffect(() => {
-    reset();
-    applyMany(PLAN_STREAM);
-  }, [huntId, reset, applyMany]);
+  const huntId = window.location.pathname.split("/plan/")[1] ?? "";
+  const view = useHuntStore((s) => s.view);
 
   return (
     <div className="fixed inset-0 bg-door-bg text-white font-sans flex">
-      {view.plan && (
-        <PlanSidebar
-          plan={view.plan}
-          onApprove={() => console.log("approve", huntId)}
-          onBack={() => goTo("/door")}
-        />
-      )}
+      {/* The Pack (static roster — independent of the plan payload). */}
+      <PlanSidebar
+        plan={(view.plan ?? {}) as PlanView}
+        onApprove={() => {}}
+        onBack={() => goTo("/door")}
+      />
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-3">
-        <p className="text-door-dim text-sm tracking-wide uppercase">
-          {view.plan ? "Review the plan" : "Planning…"}
-        </p>
-        <h1 className="text-[32px] font-normal tracking-tight m-0">
-          {view.plan ? "Ready when you are" : "Coming soon"}
-        </h1>
-        <p className="text-door-dim text-xs font-mono">{huntId}</p>
-        {!view.plan && (
-          <button
-            onClick={() => goTo("/door")}
-            className="mt-4 text-[13px] text-door-dim hover:text-white transition-colors border border-door-border rounded-lg px-4 py-2 bg-transparent cursor-pointer font-sans"
-          >
-            ← Back to Door
-          </button>
-        )}
+      {/* The Territory canvas, framed like the sidebars. */}
+      <div className="flex-1 m-2 rounded-[12px] overflow-hidden border border-[#2a2a2a] bg-[#0F0F0F]">
+        <Territory view={view} />
       </div>
 
-      {view.plan && <PlanChatSidebar />}
+      {/* Chat session — narration, Hunt Summary, Hold, artifact. */}
+      <PlanChatSidebar huntId={huntId} />
     </div>
   );
 }
