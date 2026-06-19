@@ -1,12 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
 import { DenDrawer } from "@/components/den/DenDrawer";
-import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
-import { TypeOut } from "@/components/chat/TypeOut";
+import { ChatThread } from "@/components/chat/ChatThread";
 import { api, type IntakeTurn } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 
@@ -34,19 +33,13 @@ export function DoorPage() {
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   const { turns, pending, proposal, addUser, addAlpha, setPending, propose, clearProposal, bindHunt } =
     useChatStore();
   const chatting = turns.length > 0 || pending;
 
-  // Keep the newest message in view as the conversation grows.
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns, pending, proposal]);
-
-  // Front-door clarify-gate: Alpha reads the conversation and only PROPOSES a hunt once there's a
-  // real, actionable task. Nothing launches until the Packmaster confirms (see confirmSend).
+  // Front-door clarify-gate: Alpha talks normally and only PROPOSES a hunt once there's a real job.
+  // Nothing launches until the Packmaster confirms (see confirmSend).
   async function handleSend(text: string) {
     const convo: IntakeTurn[] = [...turns, { role: "user" as const, text }].map((t) => ({
       role: t.role === "alpha" ? "assistant" : "user",
@@ -74,6 +67,7 @@ export function DoorPage() {
     if (!proposal) return;
     const brief = proposal.brief;
     clearProposal();
+    addAlpha("On it — taking you to the plan…");
     try {
       const { hunt_id } = await api.createHunt({ input: brief, source: "typed" });
       bindHunt(hunt_id);
@@ -114,6 +108,23 @@ export function DoorPage() {
     />
   );
 
+  const confirmButtons = proposal ? (
+    <div className="flex gap-2.5 self-start ml-[36px]">
+      <button
+        onClick={confirmSend}
+        className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 cursor-pointer border-none"
+      >
+        Send the pack →
+      </button>
+      <button
+        onClick={adjust}
+        className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer hover:text-white"
+      >
+        Adjust
+      </button>
+    </div>
+  ) : null;
+
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
       <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
@@ -130,55 +141,9 @@ export function DoorPage() {
         </header>
 
         {chatting ? (
-          /* ---------- Chat surface: transcript fills the space, composer pinned below ---------- */
+          /* ---------- Chat surface: ChatThread is the only scroller; composer pinned below ------ */
           <main className="flex-1 min-h-0 flex flex-col items-center px-4 pb-6">
-            <div className="w-[min(760px,92vw)] flex-1 min-h-0 overflow-y-auto scrollbar-subtle flex flex-col gap-4 py-6">
-              {turns.map((t, i) =>
-                t.role === "user" ? (
-                  <div
-                    key={i}
-                    className="bg-[#242424] rounded-2xl px-4 py-2.5 text-[14px] text-[#e4e4e7] self-end max-w-[80%]"
-                  >
-                    {t.text}
-                  </div>
-                ) : (
-                  <div key={i} className="flex gap-2.5 items-start max-w-[88%]">
-                    <AlphaAvatar />
-                    <p className="text-[14px] leading-relaxed text-[#d4d4d8] m-0 pt-0.5">
-                      <TypeOut text={t.text} />
-                    </p>
-                  </div>
-                ),
-              )}
-
-              {pending && (
-                <div className="flex gap-2.5 items-center">
-                  <AlphaAvatar />
-                  <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-                </div>
-              )}
-
-              {/* The confirm beat — nothing launches until the Packmaster clicks */}
-              {proposal && (
-                <div className="flex gap-2.5 self-start ml-[34px]">
-                  <button
-                    onClick={confirmSend}
-                    className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 cursor-pointer border-none"
-                  >
-                    Send the pack →
-                  </button>
-                  <button
-                    onClick={adjust}
-                    className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer hover:text-white"
-                  >
-                    Adjust
-                  </button>
-                </div>
-              )}
-
-              <div ref={bottomRef} />
-            </div>
-
+            <ChatThread className="w-[min(760px,92vw)] flex-1 min-h-0 py-6" footer={confirmButtons} />
             <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
           </main>
         ) : (
