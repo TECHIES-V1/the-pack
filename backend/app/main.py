@@ -16,6 +16,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -75,6 +76,15 @@ app = FastAPI(
         {"name": "instincts", "description": "Saved plan presets (the Den)."},
         {"name": "system", "description": "Health and meta."},
     ],
+)
+
+# Local dev runs the frontend on :5173 and the engine on :8000 (cross-origin). In prod the
+# nginx in deploy/ makes them same-origin, so this is harmless there. No cookies → "*" is fine.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
