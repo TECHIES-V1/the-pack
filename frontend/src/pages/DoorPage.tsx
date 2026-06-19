@@ -4,6 +4,7 @@ import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
+import { api } from "@/net/api";
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -95,10 +96,15 @@ export function DoorPage() {
               }}
               onFolderRejected={showFolderToast}
               onRecordingChange={setRecording}
-              onSubmit={({ text }) => {
-                const huntId = mockHuntId();
-                console.log("Submitting hunt:", { text, huntId });
-                goToPlan(huntId);
+              onSubmit={async ({ text }) => {
+                // Open a real hunt on the engine, then watch it on the hunt screen. Falls back
+                // to a local id if the backend isn't reachable, so the Door still navigates.
+                try {
+                  const { hunt_id } = await api.createHunt({ input: text, source: "typed" });
+                  goToPlan(hunt_id);
+                } catch {
+                  goToPlan(mockHuntId());
+                }
               }}
             />
 
