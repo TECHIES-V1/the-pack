@@ -174,6 +174,12 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
     return _accepted({"hunt_id": hunt_id, "state": "planning"})
 
 
+@app.get("/hunts", tags=["hunts"])
+async def list_hunts(request: Request) -> dict:
+    """Recent hunts, newest first — the Den's Past Hunts list."""
+    return {"hunts": await _repo(request).list_hunts()}
+
+
 @app.get("/hunts/{hunt_id}", response_model=HuntSnapshot, tags=["hunts"])
 async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
     """Snapshot: state plus last_seq (for reconnect/replay). 404 if the hunt is unknown."""
@@ -269,6 +275,15 @@ async def export_tracks(hunt_id: str, request: Request) -> dict:
     """Redacted Tracks export — the full event log for a hunt (PII redaction is NEXT)."""
     events = await _repo(request).replay_events(hunt_id, 0)
     return {"hunt_id": hunt_id, "events": [e.model_dump() for e in events], "redacted": False}
+
+
+@app.get("/hunts/{hunt_id}/artifact", tags=["hunts"])
+async def get_artifact(hunt_id: str, request: Request) -> JSONResponse:
+    """The hunt's final artifact (Howler's draft) for the reading view. 404 if none yet."""
+    artifact = await _repo(request).get_final_artifact(hunt_id)
+    if artifact is None:
+        return JSONResponse(status_code=404, content={"detail": "no final artifact yet"})
+    return JSONResponse(content=artifact)
 
 
 # --- instincts -------------------------------------------------------------------------
