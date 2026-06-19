@@ -29,7 +29,6 @@ from app.engine.ids import new_hunt_id, new_instinct_id
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
 from app.engine.supervisor import Supervisor
-from app.prompts import load_prompt
 from app.qwen.client import QwenClient
 from app.qwen.types import CallSpec
 
@@ -150,6 +149,16 @@ class AskAlpha(BaseModel):
     question: str
 
 
+# Alpha's CHAT voice — deliberately NOT the internal orchestrator prompt (that one is full of
+# ledgers/laws/gates and would leak straight into the UI, breaking product voice, Doc 02 §08).
+_ALPHA_CHAT = (
+    "You are Alpha, leader of the Pack, talking to the Packmaster. Answer in plain English, "
+    "present tense, warm and brief — 2 to 4 sentences. Never mention any internal machinery: "
+    "no tokens, models, prompts, agents, ledgers, gates, plans-as-lists, or jargon of any kind. "
+    "Do not dump checklists or step plans. Just answer the question helpfully and naturally."
+)
+
+
 class CommandAccepted(BaseModel):
     hunt_id: str
     accepted: bool
@@ -246,10 +255,10 @@ async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONRespo
             tier="plus",
             intent="chat",
             messages=[
-                {"role": "system", "content": load_prompt("alpha").body},
+                {"role": "system", "content": _ALPHA_CHAT},
                 {
                     "role": "user",
-                    "content": f"The hunt: {task}\n\nThe Packmaster asks: {body.question}",
+                    "content": f"The hunt is about: {task}\n\nThe Packmaster asks: {body.question}",
                 },
             ],
         )
