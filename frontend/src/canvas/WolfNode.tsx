@@ -17,7 +17,7 @@ import { PiCrosshairBold, PiHexagonBold } from "react-icons/pi";
 import type { WolfRole, WolfStatus } from "@/events/types";
 
 // Hex (not CSS vars) so we can build glow colors with alpha suffixes.
-const ROLE_COLOR: Record<WolfRole, string> = {
+export const ROLE_COLOR: Record<WolfRole, string> = {
   alpha: "#e6a23c",
   beta: "#3fb27f",
   scout: "#5b9bd5",
