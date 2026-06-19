@@ -20,7 +20,7 @@ function mockHuntId() {
 }
 
 function goToPlan(huntId: string) {
-  window.history.pushState({}, "", `/plan/${huntId}`);
+  window.history.pushState({}, "", `/hunt/${huntId}/plan`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
