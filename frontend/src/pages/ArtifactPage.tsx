@@ -6,8 +6,9 @@
 // text needs a GET /artifacts/:id endpoint on the engine (NEXT) — today the engine stores the
 // Howler draft in Postgres but doesn't yet serve it.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LuDownload, LuCopy, LuEllipsis, LuX } from "react-icons/lu";
+import { api } from "@/net/api";
 
 interface Source {
   n: number;
@@ -32,6 +33,23 @@ function goTo(path: string) {
 export function ArtifactPage({ huntId }: { huntId: string }) {
   const [menu, setMenu] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
+  // Pull the REAL drafted text from the engine when there is one.
+  const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .getArtifact(huntId)
+      .then((a) => {
+        const t = (a.content as { text?: string } | null)?.text;
+        if (typeof t === "string" && t.trim()) setDraft(t.trim());
+      })
+      .catch(() => {});
+  }, [huntId]);
+
+  const title = draft
+    ? draft.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "").slice(0, 120) ||
+      "The Pack's brief"
+    : "BNPL in Nigeria: The 5 Million User Claim Doesn't Add Up";
+  const paragraphs = draft ? draft.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean) : null;
 
   return (
     <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col">
@@ -63,33 +81,43 @@ export function ArtifactPage({ huntId }: { huntId: string }) {
         {/* Reading column */}
         <article className="flex-1 overflow-y-auto px-6 py-10 scrollbar-subtle">
           <div className="max-w-[720px] mx-auto flex flex-col gap-5">
-            <h1 className="text-[28px] font-semibold tracking-tight m-0">
-              BNPL in Nigeria: The 5 Million User Claim Doesn't Add Up
-            </h1>
+            <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
             <p className="text-[13px] text-[#71717a] m-0">
-              Researched and drafted by Pack · The Newsroom · June 17, 2026
+              Researched and drafted by Pack · The Newsroom
             </p>
 
-            <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
-              A claim circulating in Nigerian fintech circles — that the country has over 5 million
-              active BNPL users as of 2025 — cannot be verified against any primary source
-              <Cite n={3} onClick={() => setSource(SOURCES[2])} />. Two authoritative figures tell a
-              different story.
-            </p>
-            <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
-              The Central Bank of Nigeria's most recent data puts active BNPL users at 2.1 million
-              <Cite n={1} onClick={() => setSource(SOURCES[0])} />. A separate 2025 survey by EFInA,
-              the financial-inclusion research body, estimates 3.4 million
-              <Cite n={2} onClick={() => setSource(SOURCES[1])} />. The 5 million figure, widely
-              repeated in media coverage and investor presentations, traces back to no identifiable
-              primary source.
-            </p>
-            <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
-              The discrepancy matters. BNPL adoption in Nigeria is growing — that much is not in
-              dispute. But the gap between 2.1 million and 5 million is large enough to affect policy
-              decisions, investment theses, and regulatory posture. Until a primary source surfaces
-              for the higher figure, it should be treated as unverified.
-            </p>
+            {paragraphs ? (
+              paragraphs.map((p, i) => (
+                <p key={i} className="text-[15px] leading-7 text-[#d4d4d8] m-0">
+                  {p}
+                </p>
+              ))
+            ) : (
+              <>
+                <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
+                  A claim circulating in Nigerian fintech circles — that the country has over 5
+                  million active BNPL users as of 2025 — cannot be verified against any primary
+                  source
+                  <Cite n={3} onClick={() => setSource(SOURCES[2])} />. Two authoritative figures
+                  tell a different story.
+                </p>
+                <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
+                  The Central Bank of Nigeria's most recent data puts active BNPL users at 2.1
+                  million
+                  <Cite n={1} onClick={() => setSource(SOURCES[0])} />. A separate 2025 survey by
+                  EFInA, the financial-inclusion research body, estimates 3.4 million
+                  <Cite n={2} onClick={() => setSource(SOURCES[1])} />. The 5 million figure, widely
+                  repeated in media coverage and investor presentations, traces back to no
+                  identifiable primary source.
+                </p>
+                <p className="text-[15px] leading-7 text-[#d4d4d8] m-0">
+                  The discrepancy matters. BNPL adoption in Nigeria is growing — that much is not in
+                  dispute. But the gap between 2.1 million and 5 million is large enough to affect
+                  policy decisions, investment theses, and regulatory posture. Until a primary
+                  source surfaces for the higher figure, it should be treated as unverified.
+                </p>
+              </>
+            )}
 
             <h2 className="text-[15px] font-medium mt-4 mb-1">Sources</h2>
             <ol className="m-0 pl-5 flex flex-col gap-1.5">
