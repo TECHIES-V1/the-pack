@@ -1,0 +1,95 @@
+"""The outbox relay — Postgres → Redis, the only writer to the stream (Doc 04 §5).
+
+This is the message-relay half of the transactional outbox. The Emitter writes events to
+Postgres (the source of truth); this relay tails the committed-but-unpublished rows and
+republishes each through the existing `EventBus.append` (unchanged Redis XADD + envelope),
+then marks it relayed.
+
+It wakes two ways:
+  * `LISTEN pack_events` — Postgres delivers a notification on every committed append, so
+    the relay publishes within milliseconds (the "live" path).
+  * a periodic sweep (~1s) — a safety net that catches anything a missed/dropped
+    notification left behind, and drains the backlog on startup.
+
+Delivery is AT-LEAST-ONCE: if the process dies between XADD and `mark_relayed`, the row is
+still `relayed = FALSE` and gets republished next pass. That is safe because the frontend
+reducer drops `seq <= lastSeq` (reducer.ts) — a duplicate is a no-op at the read model. So
+we never need (and never pay for) exactly-once.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+
+import asyncpg
+
+from app.bus.redis_stream import EventBus
+from app.db.repo import NOTIFY_CHANNEL, Repo
+
+
+class OutboxRelay:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        bus: EventBus,
+        repo: Repo,
+        *,
+        poll_interval: float = 1.0,
+    ) -> None:
+        self._pool = pool
+        self._bus = bus
+        self._repo = repo
+        self._poll_interval = poll_interval
+        self._wake = asyncio.Event()
+        self._task: asyncio.Task | None = None
+        self._listen_conn: asyncpg.Connection | None = None
+
+    async def start(self) -> None:
+        """Acquire a dedicated LISTEN connection and spin up the drain loop."""
+        self._listen_conn = await self._pool.acquire()
+        await self._listen_conn.add_listener(NOTIFY_CHANNEL, self._on_notify)
+        self._task = asyncio.create_task(self._run(), name="outbox-relay")
+
+    def _on_notify(self, *_args: object) -> None:
+        # Fires on the asyncpg event loop; just nudge the loop awake.
+        self._wake.set()
+
+    async def _run(self) -> None:
+        await self._drain()  # clear any startup backlog first
+        while True:
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=self._poll_interval)
+            except TimeoutError:
+                pass  # periodic safety sweep
+            self._wake.clear()
+            try:
+                await self._drain()
+            except Exception:  # noqa: BLE001 - the relay must never die on a transient error
+                # Leave rows unrelayed; the next sweep retries (at-least-once).
+                continue
+
+    async def _drain(self) -> None:
+        """Publish every unrelayed event, in order, until the outbox is empty."""
+        while True:
+            batch = await self._repo.fetch_unrelayed()
+            if not batch:
+                return
+            for event in batch:
+                await self._bus.append(event)
+                await self._repo.mark_relayed(event.hunt_id, event.seq)
+
+    async def stop(self) -> None:
+        """Cancel the loop, do one final drain so nothing is stranded, release the conn."""
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+        with contextlib.suppress(Exception):
+            await self._drain()
+        if self._listen_conn is not None:
+            with contextlib.suppress(Exception):
+                await self._listen_conn.remove_listener(NOTIFY_CHANNEL, self._on_notify)
+            await self._pool.release(self._listen_conn)
+            self._listen_conn = None
