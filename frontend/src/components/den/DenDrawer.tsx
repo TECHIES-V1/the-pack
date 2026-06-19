@@ -58,7 +58,7 @@ export function DenDrawer() {
                       sub={`${h.state} · ${new Date(h.created_at).toLocaleDateString()}`}
                       onClick={() => {
                         setOpen(false);
-                        goTo(`/plan/${h.hunt_id}`);
+                        goTo(`/hunt/${h.hunt_id}`);
                       }}
                     />
                   ))
@@ -69,7 +69,22 @@ export function DenDrawer() {
                 {instincts.length === 0 ? (
                   <Empty text={loaded ? "No saved instincts." : "Loading…"} />
                 ) : (
-                  instincts.map((i) => <Row key={i.instinct_id} title={i.label} sub="instinct" />)
+                  instincts.map((i) => (
+                    <Row
+                      key={i.instinct_id}
+                      title={i.label}
+                      sub="instinct"
+                      onClick={() =>
+                        api
+                          .createHunt({ instinct_id: i.instinct_id, source: "typed" })
+                          .then(({ hunt_id }) => {
+                            setOpen(false);
+                            goTo(`/hunt/${hunt_id}/plan`);
+                          })
+                          .catch(() => {})
+                      }
+                    />
+                  ))
                 )}
               </Section>
             </div>
