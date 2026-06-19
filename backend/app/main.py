@@ -13,6 +13,7 @@ cancel running hunts, drain the relay, and close everything.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -149,6 +150,67 @@ class AskAlpha(BaseModel):
     question: str
 
 
+class IntakeBody(BaseModel):
+    # The conversation so far: [{"role": "user"|"assistant", "content": "..."}]
+    messages: list[dict] = Field(default_factory=list)
+
+
+# The clarify-gate prompt (research-backed: clarify → confirm → run). Alpha decides if there is a
+# real, actionable task yet; otherwise he just talks. Strictly on-voice (Doc 02 §08).
+_ALPHA_INTAKE = (
+    "You are Alpha, leader of the Pack, meeting the Packmaster at the door. Decide whether "
+    "there is a task the Pack can go and work on yet. Respond ONLY with a JSON object: "
+    '{"reply": string, "ready": boolean, "brief": string}.\n'
+    "Set ready=true whenever the message names a goal the Pack can act on — research, a draft, a "
+    "review, a summary, an analysis — even if some details are loose (the Pack fills small gaps "
+    "itself). Then brief = one crisp sentence naming the task, and reply = a short, warm 'on it' "
+    "line.\n"
+    "Set ready=false ONLY when there is no real task yet: a greeting, small talk, venting, or a "
+    "fragment so bare you cannot tell what they want done. Then reply with a warm one-line nudge "
+    'toward a goal, OR ask exactly ONE short question, and brief = "".\n'
+    "Never ask more than one question. If your reply says you will do something, ready MUST be "
+    "true. Plain English, present tense, no jargon.\n"
+    'Examples:\nUser: "hi" → {"reply": "Hey — what do you want the Pack to hunt down?", '
+    '"ready": false, "brief": ""}\n'
+    'User: "research the BNPL market in Nigeria and write me a brief" → {"reply": "On it — '
+    'I\'ll dig into Nigeria\'s BNPL market and bring you a brief.", "ready": true, "brief": '
+    '"Research the BNPL market in Nigeria and write a brief."}'
+)
+
+_GREETINGS = {
+    "hi",
+    "hii",
+    "hey",
+    "hello",
+    "yo",
+    "sup",
+    "hiya",
+    "howdy",
+    "ok",
+    "okay",
+    "thanks",
+    "thank you",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "wassup",
+    "whatsup",
+}
+
+
+def _looks_like_task(text: str) -> bool:
+    """Offline heuristic for the clarify-gate when there's no model: a greeting or a one/two-word
+    fragment isn't a task; anything more substantial is treated as actionable."""
+    t = text.strip().lower().rstrip("!.?")
+    if not t or t in _GREETINGS:
+        return False
+    return len(t.split()) >= 3
+
+
+def _last_user(messages: list[dict]) -> str:
+    return next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+
+
 # Alpha's CHAT voice — deliberately NOT the internal orchestrator prompt (that one is full of
 # ledgers/laws/gates and would leak straight into the UI, breaking product voice, Doc 02 §08).
 _ALPHA_CHAT = (
@@ -239,6 +301,61 @@ async def approve_plan(hunt_id: str, body: ApprovePlan, request: Request) -> JSO
     if not ok:
         return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
     return _accepted({"hunt_id": hunt_id, "accepted": True})
+
+
+@app.post("/hunts/intake", tags=["hunts"])
+async def intake(body: IntakeBody, request: Request) -> JSONResponse:
+    """Front-door clarify-gate: Alpha converses until there's a real task, then signals ready with
+    a one-line brief. No hunt is created here — the frontend creates one only when ready=true."""
+    client: QwenClient = request.app.state.client
+    msgs = [m for m in body.messages if m.get("content")]
+    last = _last_user(msgs)
+
+    if client.offline:
+        if _looks_like_task(last):
+            return JSONResponse(
+                {"reply": "On it — lining up the pack.", "ready": True, "brief": last.strip()[:200]}
+            )
+        return JSONResponse(
+            {
+                "reply": "Hey — I'm Alpha. What should the pack hunt down?"
+                " Research, a draft, going through a file…",
+                "ready": False,
+                "brief": "",
+            }
+        )
+
+    result = await client.complete(
+        CallSpec(
+            hunt_id="intake",
+            wolf_id="alpha",
+            tier="plus",
+            intent="intake",
+            messages=[{"role": "system", "content": _ALPHA_INTAKE}, *msgs],
+        )
+    )
+    text = (result.text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").split("\n", 1)[-1]  # drop a leading ```json fence
+    try:
+        parsed = json.loads(text)
+        reply = (
+            str(parsed.get("reply") or "").strip() or "Tell me what you want the pack to hunt down."
+        )
+        ready = bool(parsed.get("ready"))
+        brief = str(parsed.get("brief") or "").strip()
+    except (json.JSONDecodeError, AttributeError):
+        # Model didn't return clean JSON — fall back to the heuristic, keep the door usable.
+        ready = _looks_like_task(last)
+        brief = last.strip()[:200] if ready else ""
+        reply = (
+            "On it — lining up the pack."
+            if ready
+            else (text[:300] or "What should the pack hunt down?")
+        )
+    if ready and not brief:
+        brief = last.strip()[:200]
+    return JSONResponse({"reply": reply, "ready": ready, "brief": brief})
 
 
 @app.post("/hunts/{hunt_id}/ask", tags=["hunts"])
