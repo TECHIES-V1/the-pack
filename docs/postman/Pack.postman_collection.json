@@ -1,10 +1,28 @@
 {
   "info": {
-    "name": "Pack Engine",
+    "name": "Pack Engine API",
     "_postman_id": "pack-engine-collection",
-    "description": "The Pack engine REST API.\n\n**The contract: commands return 202.** The result is NOT in the HTTP response — it lands on the event stream. After `POST /hunts`, open the gateway WebSocket at `{{gatewayWs}}/hunts/{{hunt_id}}/stream?from_seq=0` and watch `hunt_created` → `plan_proposed` arrive, then `POST /plan/approve`, watch the wolves work, answer any Hold with `POST /holds/:hold_id/resolve`, and the hunt returns a final artifact.\n\nImport the **Pack — Local** environment alongside this collection. `POST /hunts` auto-captures `hunt_id` into the environment for every other request.",
+    "description": "Pack -- multi-agent hunt orchestrator. REST command surface for the Python engine.\n\nModel: commands return 202 Accepted with a small ack; the result is never in the HTTP response -- it arrives on the event stream (WS/SSE via the gateway). The exceptions are the read endpoints (GET) and the conversational POST /hunts/intake and POST /hunts/{id}/ask, which reply synchronously.\n\nTypical flow: POST /hunts/intake (clarify) -> POST /hunts (create) -> watch stream -> POST /hunts/{id}/plan/approve -> (/holds/{hold_id}/resolve when a Hold opens) -> returned -> GET /hunts/{id}/artifact.\n\nSet {{baseUrl}} in the environment. 'Create hunt' auto-saves {{huntId}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "huntId",
+      "value": ""
+    },
+    {
+      "key": "holdId",
+      "value": ""
+    },
+    {
+      "key": "instinctId",
+      "value": ""
+    }
+  ],
   "item": [
     {
       "name": "System",
@@ -14,156 +32,313 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{engineUrl}}/health", "host": ["{{engineUrl}}"], "path": ["health"] },
-            "description": "Liveness check."
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness probe. Returns {status, service}."
           },
-          "response": [
-            {
-              "name": "ok",
-              "originalRequest": { "method": "GET", "url": { "raw": "{{engineUrl}}/health" } },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"status\": \"ok\",\n  \"service\": \"pack-engine\"\n}"
-            }
-          ]
+          "response": []
         }
       ]
     },
     {
-      "name": "Hunts",
+      "name": "Conversation (front door)",
+      "item": [
+        {
+          "name": "Intake -- talk to Alpha (clarify-gate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/intake",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "intake"
+              ]
+            },
+            "description": "Alpha holds a normal conversation and decides if there's a real task yet. Synchronous reply {reply, ready, brief}. ready=false means keep chatting (no hunt, no cost); ready=true means brief is an actionable task -- create a hunt with it. Send the whole conversation so far in messages.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"research the BNPL market in Nigeria and write me a brief\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Ask Alpha (about a hunt)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "ask"
+              ]
+            },
+            "description": "Ask Alpha a question about the running/finished hunt. Synchronous on-voice reply {reply}. Does not change hunt state.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"How's it going so far?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Hunts -- create & inspect",
       "item": [
         {
           "name": "Create hunt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hunts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts"
+              ]
+            },
+            "description": "Open a hunt (202). The Supervisor starts planning immediately; watch hunt_created -> plan_proposed on the stream. Provide input (free text, usually Alpha's brief) OR instinct_id to start from a saved Instinct. source is one of typed | spoken | dropped. Saves {{huntId}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": \"Research the BNPL market in Nigeria and write a brief.\",\n  \"source\": \"typed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('202 accepted', () => pm.response.code === 202);",
-                  "const json = pm.response.json();",
-                  "if (json.hunt_id) { pm.environment.set('hunt_id', json.hunt_id); }"
+                  "const j = pm.response.json();",
+                  "if (j && j.hunt_id) { pm.collectionVariables.set('huntId', j.hunt_id); }"
                 ]
               }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"input\": \"BNPL market in Nigeria: who leads, what the regulator says, how many users\",\n  \"source\": \"typed\"\n}"
-            },
-            "url": { "raw": "{{engineUrl}}/hunts", "host": ["{{engineUrl}}"], "path": ["hunts"] },
-            "description": "Open a hunt. Returns 202 with the new hunt_id; the engine starts planning at once. The test script captures hunt_id into the environment."
-          },
-          "response": [
-            {
-              "name": "202 planning",
-              "originalRequest": { "method": "POST", "url": { "raw": "{{engineUrl}}/hunts" } },
-              "status": "Accepted",
-              "code": 202,
-              "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"hunt_id\": \"hunt_01J9ZZ...\",\n  \"state\": \"planning\"\n}"
             }
           ]
         },
         {
-          "name": "Get hunt (snapshot)",
+          "name": "List hunts",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}"]
+              "raw": "{{baseUrl}}/hunts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts"
+              ]
             },
-            "description": "Snapshot: state + last_seq (use last_seq as from_seq on reconnect). 404 if unknown."
+            "description": "All hunts (newest first) for the Den."
           },
-          "response": [
-            {
-              "name": "200 snapshot",
-              "originalRequest": { "method": "GET", "url": { "raw": "{{engineUrl}}/hunts/{{hunt_id}}" } },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"hunt_id\": \"hunt_01J9ZZ...\",\n  \"state\": \"hunting\",\n  \"last_seq\": 22\n}"
-            }
-          ]
+          "response": []
         },
         {
-          "name": "Approve plan",
+          "name": "Get hunt snapshot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}"
+              ]
+            },
+            "description": "Current state snapshot {hunt_id, state, last_seq, task} -- used to resume the stream."
+          },
+          "response": []
+        },
+        {
+          "name": "Get final artifact",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/artifact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "artifact"
+              ]
+            },
+            "description": "The deliverable once the hunt has returned (the Return document)."
+          },
+          "response": []
+        },
+        {
+          "name": "Export tracks (event log)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/tracks/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "tracks",
+                "export"
+              ]
+            },
+            "description": "Full, ordered event log {hunt_id, events[], redacted} -- powers Tracks."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Hunts -- run lifecycle",
+      "item": [
+        {
+          "name": "Approve plan (set Boundary, launch)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/plan/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "plan",
+                "approve"
+              ]
+            },
+            "description": "Approve the proposed plan and set the spend Boundary -- the hunt begins (202). mode is one of wild | on_signal | on_command. edits optionally overrides plan assumptions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mode\": \"on_signal\",\n  \"boundary_usd\": 1.0\n}"
-            },
-            "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/plan/approve",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "plan", "approve"]
-            },
-            "description": "Approve the proposed plan and set the dollar Boundary. The hunt begins; watch the stream. (First hunts are silently capped — the effective boundary may be lower than requested.)"
-          },
-          "response": [
-            {
-              "name": "202 accepted",
-              "originalRequest": { "method": "POST", "url": { "raw": "{{engineUrl}}/hunts/{{hunt_id}}/plan/approve" } },
-              "status": "Accepted",
-              "code": 202,
-              "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"hunt_id\": \"hunt_01J9ZZ...\",\n  \"accepted\": true\n}"
+              "raw": "{\n  \"mode\": \"on_signal\",\n  \"boundary_usd\": 1.0,\n  \"edits\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
-          ]
+          },
+          "response": []
         },
         {
-          "name": "Resolve hold",
+          "name": "Resolve a Hold",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/holds/{{holdId}}/resolve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "holds",
+                "{{holdId}}",
+                "resolve"
+              ]
+            },
+            "description": "Answer the one open Hold so the pack resumes (202). resolution is the chosen option; edited_text optionally supplies corrected text.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"resolution\": \"Use the regulator figure (2M)\",\n  \"edited_text\": null\n}"
-            },
-            "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/holds/{{hold_id}}/resolve",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "holds", "{{hold_id}}", "resolve"]
-            },
-            "description": "Answer an open Hold (the hold_id comes from the hold_opened event on the stream). The hunt resumes."
-          },
-          "response": [
-            {
-              "name": "202 accepted",
-              "originalRequest": { "method": "POST", "url": { "raw": "{{engineUrl}}/hunts/{{hunt_id}}/holds/{{hold_id}}/resolve" } },
-              "status": "Accepted",
-              "code": 202,
-              "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"hunt_id\": \"hunt_01J9ZZ...\",\n  \"hold_id\": \"hold_a1\",\n  \"accepted\": true\n}"
+              "raw": "{\n  \"resolution\": \"Use the regulator's figure\",\n  \"edited_text\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
-          ]
+          },
+          "response": []
         },
         {
-          "name": "Add input (mid-hunt)",
+          "name": "Add input mid-hunt",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{}" },
+            "header": [],
             "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/inputs",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "inputs"]
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/inputs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "inputs"
+              ]
             },
-            "description": "Feed new input to a running hunt without restarting (handling is NEXT)."
-          }
+            "description": "Feed new material to a running hunt (202)."
+          },
+          "response": []
         },
         {
           "name": "Stop hunt",
@@ -171,98 +346,128 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/stop",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "stop"]
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "stop"
+              ]
             },
-            "description": "Stop the hunt. Emits hunt_stopped on the stream."
-          }
+            "description": "Stop the hunt by the Packmaster's command (202)."
+          },
+          "response": []
         },
         {
-          "name": "Resume hunt",
+          "name": "Resume after Boundary halt",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"boundary_usd\": 2.0\n}" },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/resume",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "resume"]
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "resume"
+              ]
             },
-            "description": "Resume a halted hunt with a new Boundary (resume logic is NEXT)."
-          }
+            "description": "Lift a Boundary halt with a new cap and continue (202).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"boundary_usd\": 2.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         },
         {
-          "name": "Benchmark (Lone Wolf vs Pack)",
+          "name": "Benchmark -- Lone Wolf vs Pack",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/benchmark",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "benchmark"]
+              "raw": "{{baseUrl}}/hunts/{{huntId}}/benchmark",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{{huntId}}",
+                "benchmark"
+              ]
             },
-            "description": "Run the same task as a single agent and as the pack, and score both (NEXT)."
-          }
-        },
-        {
-          "name": "Export tracks",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{engineUrl}}/hunts/{{hunt_id}}/tracks/export",
-              "host": ["{{engineUrl}}"],
-              "path": ["hunts", "{{hunt_id}}", "tracks", "export"]
-            },
-            "description": "The full event log for a hunt, read from Postgres (PII redaction is NEXT)."
-          }
+            "description": "Run the same task single-agent for the Scorecard comparison (202). Stub today."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Instincts",
+      "name": "Den -- Instincts",
       "item": [
         {
           "name": "List instincts",
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{engineUrl}}/instincts", "host": ["{{engineUrl}}"], "path": ["instincts"] },
-            "description": "Saved plan presets (the Den)."
-          }
+            "url": {
+              "raw": "{{baseUrl}}/instincts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instincts"
+              ]
+            },
+            "description": "Saved Instincts (reusable hunt templates)."
+          },
+          "response": []
         },
         {
           "name": "Save instinct",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/instincts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instincts"
+              ]
+            },
+            "description": "Save a hunt setup as a one-tap Instinct. Copy instinct_id from the response.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"The Newsroom\",\n  \"spec\": { \"pattern\": \"parallel_then_merge\" }\n}"
-            },
-            "url": { "raw": "{{engineUrl}}/instincts", "host": ["{{engineUrl}}"], "path": ["instincts"] },
-            "description": "Save a plan preset."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Stream (Gateway)",
-      "item": [
-        {
-          "name": "WS — hunt event stream",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{gatewayWs}}/hunts/{{hunt_id}}/stream?from_seq=0",
-              "host": ["{{gatewayWs}}"],
-              "path": ["hunts", "{{hunt_id}}", "stream"],
-              "query": [{ "key": "from_seq", "value": "0" }]
-            },
-            "description": "Served by the RUST GATEWAY, not the engine. Open this as a **WebSocket** request in Postman (New → WebSocket Request) and paste the URL. The gateway replays from from_seq, then live-tails — each event is one JSON text frame (the envelope). Set from_seq to the snapshot's last_seq + 1 to resume after a disconnect."
-          }
+              "raw": "{\n  \"label\": \"The Newsroom\",\n  \"spec\": {\n    \"pattern\": \"research\",\n    \"voice\": \"briefing\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -270,13 +475,22 @@
       "name": "Uploads",
       "item": [
         {
-          "name": "Signed upload",
+          "name": "Signed upload URL",
           "request": {
             "method": "POST",
             "header": [],
-            "url": { "raw": "{{engineUrl}}/uploads", "host": ["{{engineUrl}}"], "path": ["uploads"] },
-            "description": "Signed OSS upload URL for private objects (NEXT)."
-          }
+            "url": {
+              "raw": "{{baseUrl}}/uploads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "uploads"
+              ]
+            },
+            "description": "Get a pre-signed object-store URL for a file drop {upload_url, object_key} (202)."
+          },
+          "response": []
         }
       ]
     }
