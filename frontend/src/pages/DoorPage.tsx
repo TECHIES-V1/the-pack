@@ -5,6 +5,8 @@ import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
 import { DenDrawer } from "@/components/den/DenDrawer";
+import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
+import { TypeOut } from "@/components/chat/TypeOut";
 import { api, type IntakeTurn } from "@/net/api";
 
 const INSTINCT_CHIPS = [
@@ -135,13 +137,20 @@ export function DoorPage() {
                         {t.content}
                       </div>
                     ) : (
-                      <div key={i} className="text-[14px] leading-relaxed text-[#d4d4d8] max-w-[88%]">
-                        <span className="text-[#e6a23c] font-medium mr-1.5">Alpha</span>
-                        {t.content}
+                      <div key={i} className="flex gap-2.5 items-start max-w-[88%]">
+                        <AlphaAvatar />
+                        <p className="text-[14px] leading-relaxed text-[#d4d4d8] m-0 pt-0.5">
+                          <TypeOut text={t.content} />
+                        </p>
                       </div>
                     ),
                   )}
-                  {thinking && <div className="text-[13px] text-[#71717a] italic">Alpha is thinking…</div>}
+                  {thinking && (
+                    <div className="flex gap-2.5 items-center">
+                      <AlphaAvatar />
+                      <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

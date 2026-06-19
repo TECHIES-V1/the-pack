@@ -4,6 +4,8 @@
 // on the stream.
 
 import { useEffect, useState } from "react";
+import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
+import { TypeOut } from "@/components/chat/TypeOut";
 import { OneBox } from "@/components/composer/OneBox";
 import { api } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
@@ -98,14 +100,21 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               {m.text}
             </div>
           ) : (
-            <div key={i} className="text-[13px] leading-relaxed text-[#d4d4d8]">
-              <span className="text-[#e6a23c] font-medium mr-1.5">Alpha</span>
-              {m.text}
+            <div key={i} className="flex gap-2 items-start">
+              <AlphaAvatar size={22} />
+              <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0 pt-px">
+                <TypeOut text={m.text} />
+              </p>
             </div>
           ),
         )}
 
-        {asking && <div className="text-[13px] text-[#71717a] italic">Alpha is thinking…</div>}
+        {asking && (
+          <div className="flex gap-2 items-center">
+            <AlphaAvatar size={22} />
+            <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
+          </div>
+        )}
 
         {view.state === "plan_ready" && view.plan && (
           <div className={`${PANEL} p-4 flex flex-col gap-3`}>
