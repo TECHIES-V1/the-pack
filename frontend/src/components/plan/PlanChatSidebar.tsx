@@ -23,6 +23,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
@@ -42,11 +43,14 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
 
   async function askAlpha(question: string) {
     setMsgs((m) => [...m, { who: "you", text: question }]);
+    setAsking(true);
     try {
       const { reply } = await api.ask(huntId, question);
       setMsgs((m) => [...m, { who: "alpha", text: reply }]);
     } catch {
-      setMsgs((m) => [...m, { who: "alpha", text: "(couldn't reach Alpha just now)" }]);
+      setMsgs((m) => [...m, { who: "alpha", text: "I couldn't reach you just now — try me again." }]);
+    } finally {
+      setAsking(false);
     }
   }
 
@@ -55,7 +59,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       <div className="px-5 pt-5 pb-4 border-b border-[#2a2a2a] flex items-center justify-between">
         <h2 className="text-[14px] font-medium m-0 leading-none">Chat session</h2>
         <div className="flex items-center gap-3">
-          {view.boundary.boundaryUsd > 0 && (
+          {view.boundary.cumulativeUsd > 0 && (
             <span className="text-[11px] text-[#a1a1aa]">
               ${view.boundary.cumulativeUsd.toFixed(2)} · {view.boundary.pct.toFixed(0)}%
             </span>
@@ -79,9 +83,12 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         )}
 
         {view.feed.map((line) => (
-          <div key={line.seq} className="text-[13px] leading-relaxed text-[#d4d4d8]">
-            <span className="text-[#71717a] mr-1">·</span>
-            {line.text}
+          <div
+            key={line.seq}
+            className="flex gap-2.5 items-start py-2 border-b border-[#202020] last:border-0"
+          >
+            <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-[#e6a23c]/70 shrink-0" />
+            <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0">{line.text}</p>
           </div>
         ))}
 
@@ -91,12 +98,14 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               {m.text}
             </div>
           ) : (
-            <div key={i} className="text-[13px] leading-relaxed text-[#e6a23c]">
-              <span className="mr-1">Alpha:</span>
+            <div key={i} className="text-[13px] leading-relaxed text-[#d4d4d8]">
+              <span className="text-[#e6a23c] font-medium mr-1.5">Alpha</span>
               {m.text}
             </div>
           ),
         )}
+
+        {asking && <div className="text-[13px] text-[#71717a] italic">Alpha is thinking…</div>}
 
         {view.state === "plan_ready" && view.plan && (
           <div className={`${PANEL} p-4 flex flex-col gap-3`}>
