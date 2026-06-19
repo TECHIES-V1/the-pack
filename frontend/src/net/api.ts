@@ -58,12 +58,29 @@ export interface Instinct {
   label: string;
   spec: Record<string, unknown>;
 }
+export interface HuntListItem {
+  hunt_id: string;
+  state: string;
+  source: string;
+  title: string;
+  boundary_usd: number | null;
+  created_at: string;
+}
+export interface FinalArtifact {
+  artifact_id: string;
+  hunt_id: string;
+  kind: string;
+  produced_by: string | null;
+  content: Record<string, unknown> | null;
+}
 
 // --- the surface -----------------------------------------------------------------------
 
 export const api = {
   createHunt: (body: CreateHuntBody) => post<HuntCreated>("/hunts", body),
+  listHunts: () => req<{ hunts: HuntListItem[] }>("/hunts"),
   getHunt: (id: string) => req<HuntSnapshot>(`/hunts/${id}`),
+  getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
   approvePlan: (id: string, body: ApprovePlanBody) =>
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
   resolveHold: (id: string, holdId: string, body: ResolveHoldBody) =>
