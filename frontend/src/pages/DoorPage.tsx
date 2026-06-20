@@ -77,11 +77,6 @@ export function DoorPage() {
     }
   }
 
-  function adjust() {
-    clearProposal();
-    addAlpha("No problem — what should I change?");
-  }
-
   function showFolderToast() {
     if (folderToastTimer.current) clearTimeout(folderToastTimer.current);
     setFolderToast(true);
@@ -108,20 +103,18 @@ export function DoorPage() {
     />
   );
 
-  const confirmButtons = proposal ? (
-    <div className="flex gap-2.5 self-start ml-[36px]">
+  // The launch CTA — a soft, scoped suggested-action chip near the input (NN/g prompt controls),
+  // not a jarring button block. Typing instead just keeps the conversation going (re-clarifies).
+  const launchChip = proposal ? (
+    <div className="w-[min(760px,92vw)] shrink-0 flex items-center gap-3 mb-2.5 px-1">
       <button
         onClick={confirmSend}
-        className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 cursor-pointer border-none"
+        className="group inline-flex items-center gap-2 bg-[#e6a23c]/15 text-[#e6a23c] border border-[#e6a23c]/40 rounded-full pl-3.5 pr-4 py-2 text-[13px] font-medium hover:bg-[#e6a23c]/25 transition-colors cursor-pointer"
       >
-        Send the pack →
+        <span className="text-[15px] leading-none">▸</span>
+        Send the pack on this
       </button>
-      <button
-        onClick={adjust}
-        className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer hover:text-white"
-      >
-        Adjust
-      </button>
+      <span className="text-[12px] text-[#71717a]">or tell me what to tweak</span>
     </div>
   ) : null;
 
@@ -143,7 +136,8 @@ export function DoorPage() {
         {chatting ? (
           /* ---------- Chat surface: ChatThread is the only scroller; composer pinned below ------ */
           <main className="flex-1 min-h-0 flex flex-col items-center px-4 pb-6">
-            <ChatThread className="w-[min(760px,92vw)] flex-1 min-h-0 py-6" footer={confirmButtons} />
+            <ChatThread className="w-[min(760px,92vw)] flex-1 min-h-0 py-6" />
+            {launchChip}
             <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
           </main>
         ) : (
