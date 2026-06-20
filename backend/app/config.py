@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     # Boundary.
     first_hunt_cap_usd: float = 0.50
 
+    # Web search (real research). An empty key falls back to the deterministic canned
+    # provider, so the whole engine still runs offline end to end (Doc 04 §07).
+    search_provider: str = "tavily"
+    search_api_key: str = ""
+    search_max_results: int = 5
+
+    # Research strategy — the selectable engine modes. ORTHOGONAL to the autonomy `mode`
+    # (wild | on_signal | on_command): strategy shapes the plan, mode shapes execution.
+    # One of: orchestrate | deep_dive | critique.
+    default_strategy: str = "orchestrate"
+
     # Pricing — USD per 1M tokens (input, output) per tier. Placeholders in the right ballpark
     # for Qwen on Model Studio; confirm real numbers when the key lands and override via env.
     price_max_in_per_m: float = 1.60
