@@ -4,9 +4,10 @@ import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
+import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
-import { api, type IntakeTurn } from "@/net/api";
+import { api, type IntakeTurn, type StrategyName } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 
 const INSTINCT_CHIPS = [
@@ -32,6 +33,7 @@ export function DoorPage() {
   const [prefill, setPrefill] = useState<string | undefined>();
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
+  const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { turns, pending, proposal, addUser, addAlpha, setPending, propose, clearProposal, bindHunt } =
@@ -69,7 +71,7 @@ export function DoorPage() {
     clearProposal();
     addAlpha("On it — taking you to the plan…");
     try {
-      const { hunt_id } = await api.createHunt({ input: brief, source: "typed" });
+      const { hunt_id } = await api.createHunt({ input: brief, source: "typed", strategy });
       bindHunt(hunt_id);
       goToPlan(hunt_id);
     } catch {
@@ -106,15 +108,21 @@ export function DoorPage() {
   // The launch CTA — a soft, scoped suggested-action chip near the input (NN/g prompt controls),
   // not a jarring button block. Typing instead just keeps the conversation going (re-clarifies).
   const launchChip = proposal ? (
-    <div className="w-[min(760px,92vw)] shrink-0 flex items-center gap-3 mb-2.5 px-1">
-      <button
-        onClick={confirmSend}
-        className="group inline-flex items-center gap-2 bg-[#e6a23c]/15 text-[#e6a23c] border border-[#e6a23c]/40 rounded-full pl-3.5 pr-4 py-2 text-[13px] font-medium hover:bg-[#e6a23c]/25 transition-colors cursor-pointer"
-      >
-        <span className="text-[15px] leading-none">▸</span>
-        Send the pack on this
-      </button>
-      <span className="text-[12px] text-[#71717a]">or tell me what to tweak</span>
+    <div className="w-[min(760px,92vw)] shrink-0 flex flex-col gap-2 mb-2.5 px-1">
+      <div className="flex items-center gap-2.5">
+        <span className="text-[12px] text-[#71717a]">Mode</span>
+        <StrategyPicker value={strategy} onChange={setStrategy} />
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={confirmSend}
+          className="group inline-flex items-center gap-2 bg-[#e6a23c]/15 text-[#e6a23c] border border-[#e6a23c]/40 rounded-full pl-3.5 pr-4 py-2 text-[13px] font-medium hover:bg-[#e6a23c]/25 transition-colors cursor-pointer"
+        >
+          <span className="text-[15px] leading-none">▸</span>
+          Send the pack on this
+        </button>
+        <span className="text-[12px] text-[#71717a]">or tell me what to tweak</span>
+      </div>
     </div>
   ) : null;
 
@@ -173,6 +181,11 @@ export function DoorPage() {
               </AnimatePresence>
 
               {composer}
+
+              <div className="flex items-center gap-2.5 px-1 pt-0.5">
+                <span className="text-[12px] text-[#71717a]">How should they hunt?</span>
+                <StrategyPicker value={strategy} onChange={setStrategy} disabled={recording} />
+              </div>
 
               <AnimatePresence>
                 {alphaFile && (

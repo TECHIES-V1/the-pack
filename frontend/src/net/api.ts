@@ -26,10 +26,13 @@ const post = <T>(path: string, body?: unknown) =>
 
 // --- request/response shapes (mirror the engine's Pydantic bodies) ---------------------
 
+export type StrategyName = "orchestrate" | "deep_dive" | "critique";
+
 export interface CreateHuntBody {
   input?: string;
   instinct_id?: string;
   source?: "typed" | "spoken" | "dropped";
+  strategy?: StrategyName;
 }
 export interface HuntCreated {
   hunt_id: string;
@@ -40,6 +43,12 @@ export interface HuntSnapshot {
   state: string;
   last_seq: number;
   task: string;
+  strategy?: StrategyName;
+}
+export interface StrategyInfo {
+  name: StrategyName;
+  label: string;
+  pattern: string;
 }
 export interface ApprovePlanBody {
   mode: "wild" | "on_signal" | "on_command";
@@ -89,6 +98,8 @@ export interface IntakeReply {
 export const api = {
   intake: (messages: IntakeTurn[]) => post<IntakeReply>("/hunts/intake", { messages }),
   createHunt: (body: CreateHuntBody) => post<HuntCreated>("/hunts", body),
+  getStrategies: () =>
+    req<{ strategies: StrategyInfo[]; default: StrategyName }>("/strategies"),
   listHunts: () => req<{ hunts: HuntListItem[] }>("/hunts"),
   getHunt: (id: string) => req<HuntSnapshot>(`/hunts/${id}`),
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
@@ -96,8 +107,9 @@ export const api = {
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
   resolveHold: (id: string, holdId: string, body: ResolveHoldBody) =>
     post<CommandAccepted>(`/hunts/${id}/holds/${holdId}/resolve`, body),
-  ask: (id: string, question: string) =>
-    post<{ reply: string }>(`/hunts/${id}/ask`, { question }),
+  // Multi-turn: pass the conversation so far so Alpha remembers the thread.
+  ask: (id: string, messages: IntakeTurn[]) =>
+    post<{ reply: string }>(`/hunts/${id}/ask`, { messages }),
   addInput: (id: string) => post<CommandAccepted>(`/hunts/${id}/inputs`),
   stop: (id: string) => post<CommandAccepted>(`/hunts/${id}/stop`),
   resume: (id: string, boundary_usd: number) =>
