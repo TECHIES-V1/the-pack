@@ -30,6 +30,7 @@ def test_fixtures_exist() -> None:
         "flow_b_meeting.jsonl",
         "boundary_halt.jsonl",
         "standoff_stray.jsonl",
+        "living_canvas.jsonl",
     }, f"unexpected fixture set: {names}"
 
 

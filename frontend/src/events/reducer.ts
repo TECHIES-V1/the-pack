@@ -20,6 +20,11 @@ export interface WolfView {
   status: WolfStatus;
   tier: "max" | "plus" | "flash";
   thinking: boolean;
+  // Live telemetry the canvas renders on each node (Phase 2).
+  liveText?: string; // latest wolf_progress beat — what this wolf is doing right now
+  phase?: string; // latest wolf_progress phase (searching | reading | thinking | …)
+  sources: number; // hits this wolf has gathered (from tool_result)
+  spendUsd: number; // this wolf's cumulative spend (from tokens_spent)
 }
 
 export interface FeedLine {
@@ -55,6 +60,7 @@ export interface PlanView {
   assumptions: string[];
   est_cost: number;
   est_time: number;
+  strategy?: string; // the selected research strategy (additive plan_proposed field)
 }
 
 export interface HuntView {
@@ -92,14 +98,25 @@ function f<T = string>(ev: PackEvent, key: string): T {
   return ev.payload[key] as T;
 }
 
+function patchWolf(
+  s: HuntView,
+  wolfId: string | undefined,
+  patch: Partial<WolfView>,
+): Record<string, WolfView> {
+  if (!wolfId || !s.wolves[wolfId]) return s.wolves;
+  return { ...s.wolves, [wolfId]: { ...s.wolves[wolfId], ...patch } };
+}
+
 function setWolf(
   s: HuntView,
   wolfId: string | undefined,
   status: WolfStatus,
 ): Record<string, WolfView> {
-  if (!wolfId || !s.wolves[wolfId]) return s.wolves;
-  return { ...s.wolves, [wolfId]: { ...s.wolves[wolfId], status } };
+  return patchWolf(s, wolfId, { status });
 }
+
+// wolf_progress phases that mean "deliberating" (shimmer) vs "actively working".
+const THINKING_PHASES = new Set(["thinking", "critiquing"]);
 
 function feed(s: HuntView, ev: PackEvent, text: string): FeedLine[] {
   return [...s.feed, { seq: ev.seq, ts: ev.ts, text }];
@@ -135,6 +152,7 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           assumptions: f<string[]>(ev, "assumptions"),
           est_cost: f<number>(ev, "est_cost"),
           est_time: f<number>(ev, "est_time"),
+          strategy: ev.payload["strategy"] as string | undefined,
         },
       };
 
@@ -162,6 +180,8 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
             status: "idle",
             tier: f<"max" | "plus" | "flash">(ev, "model_tier"),
             thinking: f<boolean>(ev, "thinking"),
+            sources: 0,
+            spendUsd: 0,
           },
         },
       };
@@ -171,20 +191,57 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       return { ...s, wolves: setWolf(s, f(ev, "wolf_id"), "hunting") };
 
     case "step_completed":
-      return { ...s, wolves: setWolf(s, f(ev, "wolf_id"), "done") };
+      // Work done — keep the last liveText as the node's result line, but stop deliberating.
+      return { ...s, wolves: patchWolf(s, f(ev, "wolf_id"), { status: "done", phase: undefined }) };
 
-    case "message_passed":
+    case "wolf_progress": {
+      const wolfId = f(ev, "wolf_id");
+      if (!s.wolves[wolfId]) return s;
+      const phase = f(ev, "phase");
+      // A live beat only deliberates/works a wolf that hasn't already finished its step.
+      const cur = s.wolves[wolfId].status;
+      const status: WolfStatus =
+        cur === "done" || cur === "stray"
+          ? cur
+          : THINKING_PHASES.has(phase)
+            ? "thinking"
+            : "hunting";
       return {
         ...s,
-        wolves: setWolf(s, f(ev, "from_wolf"), "talking"),
-        feed: feed(s, ev, `${f(ev, "from_wolf")} handed off to ${f(ev, "to_wolf")}: ${f(ev, "summary")}`),
+        wolves: patchWolf(s, wolfId, { status, phase, liveText: f(ev, "text") }),
       };
+    }
+
+    case "message_passed": {
+      const from = f(ev, "from_wolf");
+      // Don't resurrect a finished wolf into "talking" — a handoff at completion stays done.
+      const status = s.wolves[from]?.status === "done" ? "done" : "talking";
+      return {
+        ...s,
+        wolves: patchWolf(s, from, { status }),
+        feed: feed(s, ev, `${from} handed off to ${f(ev, "to_wolf")}: ${f(ev, "summary")}`),
+      };
+    }
 
     case "tool_called":
       return { ...s, feed: feed(s, ev, `${f(ev, "wolf_id")} is searching: ${f(ev, "args_summary")}`) };
 
-    case "tokens_spent":
-      return { ...s, boundary: boundaryWith(s, f<number>(ev, "cumulative_usd")) };
+    case "tool_result": {
+      const wolfId = f(ev, "wolf_id");
+      const hits = Number(ev.payload["hits"] ?? 0);
+      const w = s.wolves[wolfId];
+      if (!w || !hits) return s;
+      return { ...s, wolves: patchWolf(s, wolfId, { sources: w.sources + hits }) };
+    }
+
+    case "tokens_spent": {
+      const wolfId = f(ev, "wolf_id");
+      const w = s.wolves[wolfId];
+      const wolves = w
+        ? patchWolf(s, wolfId, { spendUsd: w.spendUsd + Number(f<number>(ev, "cost_usd") || 0) })
+        : s.wolves;
+      return { ...s, wolves, boundary: boundaryWith(s, f<number>(ev, "cumulative_usd")) };
+    }
 
     case "hold_opened":
       return {

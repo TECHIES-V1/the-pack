@@ -1,11 +1,12 @@
-// WolfNode — a wolf as a circular node, per the design-system board (Doc 03 §6).
+// WolfNode — a wolf as a living node on the Territory (Doc 03 §6, Phase 2).
 //
 // Color is by ROLE; the STATE changes the treatment:
 //   idle (dim ring) · hunting (solid + glow) · talking (solid + line) · holding (white ring,
 //   paused) · stray (solid red, any role) · done (solid green, any role) · thinking (shimmer).
 //
-// WolfCard is presentational (states gallery + canvas); WolfNode wraps it with React Flow
-// Handles. Every state is visibly distinct; no state changes without an event.
+// Beyond the circle, an active wolf now shows what it's actually doing: its tier, its live
+// action line (the latest wolf_progress beat), and its running source count + spend. Half the
+// design — a node you can read at a glance — was built and never wired; this wires it.
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { CSSProperties, ReactNode } from "react";
@@ -45,6 +46,8 @@ const IDLE_RING = "#3a3a3a";
 const IDLE_ICON = "#6b7280";
 const PANEL = "#1a1a1a";
 
+const ACTIVE = new Set<WolfStatus>(["hunting", "talking", "thinking", "holding"]);
+
 interface NodeStyle {
   fill: string;
   ring: string;
@@ -79,11 +82,23 @@ export interface WolfNodeData {
   status: WolfStatus;
   tier: "max" | "plus" | "flash";
   thinking: boolean;
+  liveText?: string;
+  phase?: string;
+  sources?: number;
+  spendUsd?: number;
   [key: string]: unknown;
+}
+
+function truncate(text: string, n: number): string {
+  return text.length > n ? text.slice(0, n - 1).trimEnd() + "…" : text;
 }
 
 export function WolfCard({ data, selected = false }: { data: WolfNodeData; selected?: boolean }) {
   const s = nodeStyle(data.role, data.status);
+  const active = ACTIVE.has(data.status);
+  const sources = data.sources ?? 0;
+  const spend = data.spendUsd ?? 0;
+
   const circle: CSSProperties = {
     width: 52,
     height: 52,
@@ -98,16 +113,66 @@ export function WolfCard({ data, selected = false }: { data: WolfNodeData; selec
     boxShadow: s.glow ? `0 0 18px ${s.glow}66, 0 0 0 4px ${s.glow}22` : "none",
     outline: selected ? "2px solid rgba(255,255,255,0.25)" : "none",
     outlineOffset: 3,
-    transition: "background var(--motion-base) var(--easing), border-color var(--motion-base) var(--easing), box-shadow var(--motion-base) var(--easing)",
+    transition:
+      "background var(--motion-base) var(--easing), border-color var(--motion-base) var(--easing), box-shadow var(--motion-base) var(--easing)",
   };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: 92, fontFamily: "var(--font-sans)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 5,
+        width: 156,
+        fontFamily: "var(--font-sans)",
+      }}
+    >
       <div className={s.shimmer ? "animate-shimmer" : ""} style={circle}>
         {ROLE_ICON[data.role]}
       </div>
-      <span style={{ fontSize: 12, color: "#d4d4d8", textTransform: "capitalize", lineHeight: 1 }}>
-        {data.role}
-      </span>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 5, lineHeight: 1 }}>
+        <span style={{ fontSize: 12, color: "#e4e4e7", textTransform: "capitalize" }}>
+          {data.role}
+        </span>
+        <span
+          style={{
+            fontSize: 9,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+            color: "#9ca3af",
+            background: "#0f0f0f",
+            border: "1px solid #2a2a2a",
+            borderRadius: 4,
+            padding: "1px 4px",
+          }}
+        >
+          {data.tier}
+        </span>
+      </div>
+
+      {active && data.liveText ? (
+        <div
+          style={{
+            fontSize: 10.5,
+            lineHeight: 1.3,
+            color: "#a1a1aa",
+            textAlign: "center",
+            maxWidth: 156,
+            minHeight: 26,
+          }}
+        >
+          {truncate(data.liveText, 56)}
+        </div>
+      ) : null}
+
+      {sources > 0 || spend > 0 ? (
+        <div style={{ display: "flex", gap: 8, fontSize: 9.5, color: "#71717a" }}>
+          {sources > 0 && <span>{sources} src</span>}
+          {spend > 0 && <span>${spend.toFixed(2)}</span>}
+        </div>
+      ) : null}
     </div>
   );
 }

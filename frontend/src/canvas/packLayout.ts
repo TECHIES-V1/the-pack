@@ -5,13 +5,13 @@
 import dagre from "dagre";
 import { Position, type Edge, type Node } from "@xyflow/react";
 
-const NODE_W = 92;
-const NODE_H = 76;
+const NODE_W = 156;
+const NODE_H = 116;
 
 export function layoutPack(nodes: Node[], edges: Edge[], direction: "LR" | "TB" = "TB"): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: direction, nodesep: 36, ranksep: 64 });
+  g.setGraph({ rankdir: direction, nodesep: 48, ranksep: 88 });
 
   nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
   edges.forEach((e) => g.setEdge(e.source, e.target));

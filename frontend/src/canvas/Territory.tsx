@@ -15,6 +15,7 @@ import {
 
 import { ROLE_COLOR, nodeTypes, type WolfNodeData } from "./WolfNode";
 import { layoutPack } from "./packLayout";
+import { TraceRail } from "./TraceRail";
 import type { HuntView, WolfView } from "@/events/reducer";
 import type { WolfRole, WolfStatus } from "@/events/types";
 
@@ -51,6 +52,8 @@ function displayWolves(view: HuntView): WolfView[] {
         status: "idle" as WolfStatus,
         tier: TIER_BY_ROLE[role],
         thinking: false,
+        sources: 0,
+        spendUsd: 0,
       };
     });
 }
@@ -83,6 +86,10 @@ function buildGraph(view: HuntView): { nodes: Node[]; edges: Edge[] } {
       status: w.status,
       tier: w.tier,
       thinking: w.thinking,
+      liveText: w.liveText,
+      phase: w.phase,
+      sources: w.sources,
+      spendUsd: w.spendUsd,
     } satisfies WolfNodeData,
   }));
 
@@ -129,7 +136,7 @@ export function Territory({ view }: { view: HuntView }) {
 
   return (
     <ReactFlowProvider>
-      <div style={{ width: "100%", height: "100%", background: "var(--territory-bg)" }}>
+      <div style={{ position: "relative", width: "100%", height: "100%", background: "var(--territory-bg)" }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -140,6 +147,7 @@ export function Territory({ view }: { view: HuntView }) {
           <Background color="#242424" gap={22} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
+        <TraceRail feed={view.feed} />
       </div>
     </ReactFlowProvider>
   );
