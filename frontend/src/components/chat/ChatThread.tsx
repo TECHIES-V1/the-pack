@@ -7,7 +7,7 @@
 
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
-import { TypeOut } from "@/components/chat/TypeOut";
+import { RevealedMarkdown } from "@/components/chat/RevealedMarkdown";
 import { useChatStore } from "@/store/chatStore";
 
 interface ChatThreadProps {
@@ -56,9 +56,9 @@ export function ChatThread({
             ) : (
               <div key={i} className="flex gap-2.5 items-start max-w-[90%]">
                 <AlphaAvatar size={avatarSize} />
-                <p className={`leading-relaxed text-[#d4d4d8] m-0 pt-0.5 whitespace-pre-wrap ${textClass}`}>
-                  <TypeOut text={t.text} />
-                </p>
+                <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
+                  <RevealedMarkdown text={t.text} />
+                </div>
               </div>
             ),
           )}
