@@ -29,6 +29,7 @@ from app.engine.core import Emitter
 from app.engine.ids import new_hunt_id, new_instinct_id
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
+from app.engine.strategies import strategy_catalog
 from app.engine.supervisor import Supervisor
 from app.qwen.client import QwenClient
 from app.qwen.types import CallSpec
@@ -112,6 +113,9 @@ class CreateHunt(BaseModel):
     input: str | None = Field(None, description="The task, typed or transcribed.")
     instinct_id: str | None = Field(None, description="Start from a saved instinct instead.")
     source: str = Field("typed", description="typed | spoken | dropped")
+    strategy: str | None = Field(
+        None, description="Research strategy: orchestrate | deep_dive | critique."
+    )
 
 
 class ApprovePlan(BaseModel):
@@ -144,10 +148,14 @@ class HuntSnapshot(BaseModel):
     state: str
     last_seq: int
     task: str = ""
+    strategy: str = "orchestrate"
 
 
 class AskAlpha(BaseModel):
-    question: str
+    # Multi-turn: the conversation so far [{"role": "user"|"assistant", "content": "..."}].
+    # `question` is the back-compat single-turn fallback.
+    question: str | None = None
+    messages: list[dict] = Field(default_factory=list)
 
 
 class IntakeBody(BaseModel):
@@ -168,6 +176,9 @@ _ALPHA_INTAKE = (
     "- Lead with the actual answer, then add only what's genuinely useful — substantive but easy "
     "to read. Say exactly as much as the moment needs: a quick fact is a sentence; a real question "
     "deserves a few. Don't pad, don't ramble, and don't be clipped or curt.\n"
+    "- Format for easy reading. When the answer is a set of items, options, or steps, use a short "
+    "Markdown bullet list ('- ' lines) with the key term in **bold**; otherwise write natural "
+    "prose. Leave a blank line between distinct ideas. Keep it conversational, not a wall.\n"
     "- Sound human and present-tense. First person ('I', 'me') is good; a little warmth and "
     "personality is welcome. No jargon, no robotic filler, no repeating 'name a task'.\n"
     "- When you need something from them, end with ONE natural question — never a stack.\n"
@@ -282,6 +293,12 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "pack-engine"}
 
 
+@app.get("/strategies", tags=["system"])
+async def strategies() -> dict:
+    """The selectable research strategies (the Door's mode picker)."""
+    return {"strategies": strategy_catalog(), "default": settings.default_strategy}
+
+
 # --- hunts -----------------------------------------------------------------------------
 
 
@@ -293,7 +310,8 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
     """
     repo, registry = _repo(request), _registry(request)
     hunt_id = new_hunt_id()
-    await repo.create_hunt(hunt_id, body.source, body.input)
+    strategy = body.strategy or settings.default_strategy
+    await repo.create_hunt(hunt_id, body.source, body.input, strategy)
 
     handle = registry.register(hunt_id)
     emitter = Emitter(hunt_id, repo)
@@ -305,6 +323,7 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
         handle.commands,
         source=body.source,
         raw_input=body.input or "",
+        strategy=strategy,
     )
     handle.task = asyncio.create_task(supervisor.run(), name=f"hunt-{hunt_id}")
     return _accepted({"hunt_id": hunt_id, "state": "planning"})
@@ -328,6 +347,7 @@ async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
             "state": snap["state"],
             "last_seq": snap["last_seq"],
             "task": snap["raw_input"],
+            "strategy": snap.get("strategy", "orchestrate"),
         }
     )
 
@@ -406,24 +426,25 @@ async def intake(body: IntakeBody, request: Request) -> JSONResponse:
 
 @app.post("/hunts/{hunt_id}/ask", tags=["hunts"])
 async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONResponse:
-    """A side question to Alpha about the hunt — a one-shot model call (NOT event-sourced).
-    Offline this returns FakeQwen's canned reply, so the chat works with no key too."""
+    """A side conversation with Alpha about the hunt — a model call that carries the FULL
+    conversation history, so Alpha actually remembers what you've been talking about (NOT
+    event-sourced). Offline this returns FakeQwen's canned reply, so the chat works with no key."""
     snap = await _repo(request).get_hunt_snapshot(hunt_id)
     task = (snap or {}).get("raw_input", "")
     client: QwenClient = request.app.state.client
+
+    history = [m for m in body.messages if m.get("content")]
+    if not history and body.question:
+        history = [{"role": "user", "content": body.question}]
+
+    system = f"{_ALPHA_CHAT}\n\nThe hunt you're discussing is about: {task or 'the current task'}."
     result = await client.complete(
         CallSpec(
             hunt_id=hunt_id,
             wolf_id="alpha",
             tier="plus",
             intent="chat",
-            messages=[
-                {"role": "system", "content": _ALPHA_CHAT},
-                {
-                    "role": "user",
-                    "content": f"The hunt is about: {task}\n\nThe Packmaster asks: {body.question}",
-                },
-            ],
+            messages=[{"role": "system", "content": system}, *history],
         )
     )
     return JSONResponse(content={"reply": result.text})

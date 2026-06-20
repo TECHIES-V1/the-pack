@@ -19,8 +19,15 @@ class FakeRepo:
         self.hunts: dict[str, dict[str, Any]] = {}
         self.artifacts: list[dict[str, Any]] = []
 
-    async def create_hunt(self, hunt_id: str, source: str, raw_input: str | None) -> None:
-        self.hunts[hunt_id] = {"state": "planning", "source": source, "raw_input": raw_input}
+    async def create_hunt(
+        self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"
+    ) -> None:
+        self.hunts[hunt_id] = {
+            "state": "planning",
+            "source": source,
+            "raw_input": raw_input,
+            "strategy": strategy,
+        }
 
     async def set_hunt_state(self, hunt_id: str, state: str) -> None:
         self.hunts.setdefault(hunt_id, {})["state"] = state

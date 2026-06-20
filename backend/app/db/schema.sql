@@ -13,10 +13,14 @@ CREATE TABLE IF NOT EXISTS hunts (
     state        TEXT        NOT NULL DEFAULT 'planning',
     source       TEXT        NOT NULL DEFAULT 'typed',   -- typed | spoken | dropped
     raw_input    TEXT,
+    strategy     TEXT        NOT NULL DEFAULT 'orchestrate', -- orchestrate | deep_dive | critique
     boundary_usd DOUBLE PRECISION,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Older deployments may predate `strategy`; add it without disturbing existing rows.
+ALTER TABLE hunts ADD COLUMN IF NOT EXISTS strategy TEXT NOT NULL DEFAULT 'orchestrate';
 
 -- The event log. Append-only, never edited. This table IS the transactional outbox:
 -- `relayed` marks whether the outbox relay has published the row to Redis yet.

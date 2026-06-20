@@ -26,16 +26,19 @@ class Repo:
 
     # --- hunts -------------------------------------------------------------------------
 
-    async def create_hunt(self, hunt_id: str, source: str, raw_input: str | None) -> None:
+    async def create_hunt(
+        self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"
+    ) -> None:
         await self._pool.execute(
             """
-            INSERT INTO hunts (hunt_id, state, source, raw_input)
-            VALUES ($1, 'planning', $2, $3)
+            INSERT INTO hunts (hunt_id, state, source, raw_input, strategy)
+            VALUES ($1, 'planning', $2, $3, $4)
             ON CONFLICT (hunt_id) DO NOTHING
             """,
             hunt_id,
             source,
             raw_input,
+            strategy,
         )
 
     async def set_hunt_state(self, hunt_id: str, state: str) -> None:
@@ -55,7 +58,8 @@ class Repo:
     async def get_hunt_snapshot(self, hunt_id: str) -> dict[str, Any] | None:
         """State + last_seq, or None if the hunt does not exist (REST returns 404)."""
         row = await self._pool.fetchrow(
-            "SELECT hunt_id, state, source, raw_input, boundary_usd FROM hunts WHERE hunt_id = $1",
+            "SELECT hunt_id, state, source, raw_input, strategy, boundary_usd "
+            "FROM hunts WHERE hunt_id = $1",
             hunt_id,
         )
         if row is None:
@@ -65,6 +69,7 @@ class Repo:
             "state": row["state"],
             "source": row["source"],
             "raw_input": row["raw_input"] or "",
+            "strategy": row["strategy"],
             "boundary_usd": row["boundary_usd"],
             "last_seq": await self.get_last_seq(hunt_id),
         }
