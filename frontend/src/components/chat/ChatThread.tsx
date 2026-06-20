@@ -56,7 +56,7 @@ export function ChatThread({
             ) : (
               <div key={i} className="flex gap-2.5 items-start max-w-[90%]">
                 <AlphaAvatar size={avatarSize} />
-                <p className={`leading-relaxed text-[#d4d4d8] m-0 pt-0.5 ${textClass}`}>
+                <p className={`leading-relaxed text-[#d4d4d8] m-0 pt-0.5 whitespace-pre-wrap ${textClass}`}>
                   <TypeOut text={t.text} />
                 </p>
               </div>

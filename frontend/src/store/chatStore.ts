@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { stripDashes } from "@/lib/text";
 
 export interface ChatTurn {
   role: "user" | "alpha";
@@ -35,9 +36,10 @@ export const useChatStore = create<ChatStore>()(
       proposal: null,
       huntId: null,
       addUser: (text) => set((s) => ({ turns: [...s.turns, { role: "user", text }] })),
-      addAlpha: (text) => set((s) => ({ turns: [...s.turns, { role: "alpha", text }] })),
+      // Everything Alpha says is cleansed of em/en dashes before it ever reaches the screen.
+      addAlpha: (text) => set((s) => ({ turns: [...s.turns, { role: "alpha", text: stripDashes(text) }] })),
       setPending: (pending) => set({ pending }),
-      propose: (brief) => set({ proposal: { brief } }),
+      propose: (brief) => set({ proposal: { brief: stripDashes(brief) } }),
       clearProposal: () => set({ proposal: null }),
       bindHunt: (huntId) => set({ huntId }),
       reset: () => set({ turns: [], pending: false, proposal: null, huntId: null }),
