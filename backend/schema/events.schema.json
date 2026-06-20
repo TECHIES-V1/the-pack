@@ -26,6 +26,7 @@
     { "if": { "properties": { "type": { "const": "step_started" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/step_started" } } } },
     { "if": { "properties": { "type": { "const": "step_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/step_completed" } } } },
     { "if": { "properties": { "type": { "const": "message_passed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/message_passed" } } } },
+    { "if": { "properties": { "type": { "const": "wolf_progress" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/wolf_progress" } } } },
     { "if": { "properties": { "type": { "const": "tool_called" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tool_called" } } } },
     { "if": { "properties": { "type": { "const": "tool_result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tool_result" } } } },
     { "if": { "properties": { "type": { "const": "tokens_spent" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/tokens_spent" } } } },
@@ -51,7 +52,7 @@
       "enum": [
         "hunt_created", "input_added", "transcript_ready",
         "plan_proposed", "plan_edited", "plan_approved",
-        "wolf_spawned", "step_started", "step_completed", "message_passed",
+        "wolf_spawned", "step_started", "step_completed", "message_passed", "wolf_progress",
         "tool_called", "tool_result", "tokens_spent",
         "hold_opened", "hold_resolved",
         "standoff_opened", "standoff_turn", "standoff_resolved",
@@ -166,6 +167,17 @@
           "intent": { "type": "string" },
           "summary": { "type": "string" },
           "ref": { "type": ["string", "null"] }
+        }
+      },
+      "wolf_progress": {
+        "type": "object",
+        "description": "A live progress beat from a working wolf — its evolving thought/finding, streamed to the wolf's node on the canvas. Throttled by the engine (sentence/length), never one per token.",
+        "required": ["wolf_id", "phase", "text"],
+        "properties": {
+          "wolf_id": { "type": "string" },
+          "phase": { "enum": ["thinking", "searching", "reading", "merging", "writing", "critiquing"] },
+          "text": { "type": "string" },
+          "tokens": { "type": ["integer", "null"] }
         }
       },
       "tool_called": {
