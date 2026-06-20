@@ -1,106 +1,76 @@
-// App shell. A thin nav over three views: the Door (S1, placeholder), the Territory (S3,
-// fed by the sample stream so it lights up without a backend), and the states gallery.
-// Real routing + the full screen set (Doc 02) land in WS-B/WS-C/WS-D.
+// App shell + router (Doc 02 §01 routes). When a hunt is in the URL, App connects the live
+// gateway stream and feeds the store; every screen renders purely from the event log.
+//   /                      Door (S1)
+//   /hunt/:id/plan         review + Send  ┐ both render HuntScreen (state-driven:
+//   /hunt/:id              live → Return  ┘ plan_ready · hunting · returned)
+//   /hunt/:id/tracks       Tracks (S5)
+//   /hunt/:id/scorecard    Scorecard (S6)
+//   /gallery               states gallery (dev)
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { Territory } from "@/canvas/Territory";
 import { DoorPage } from "@/pages/DoorPage";
-import { PlanPage } from "@/pages/PlanPage";
+import { HuntScreen } from "@/pages/HuntScreen";
+import { TracksPage } from "@/pages/TracksPage";
+import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { useHuntStore } from "@/store/huntStore";
-import { sampleStream } from "@/demo/sampleStream";
+import { useChatStore } from "@/store/chatStore";
+import { StreamClient } from "@/net/streamClient";
 
-type View = "door" | "territory" | "gallery" | "plan";
+type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery";
 
-function getInitialView(): View {
+interface Route {
+  view: View;
+  huntId: string | null;
+}
+
+function parseRoute(): Route {
   const path = window.location.pathname.replace(/^\//, "");
-  if (path === "door" || path === "territory" || path === "gallery") return path;
-  if (path.startsWith("plan")) return "plan";
-  return "territory";
+  if (path.startsWith("hunt/")) {
+    const [id, sub] = path.slice("hunt/".length).split("/");
+    if (sub === "tracks") return { view: "tracks", huntId: id };
+    if (sub === "scorecard") return { view: "scorecard", huntId: id };
+    return { view: "hunt", huntId: id }; // /hunt/:id and /hunt/:id/plan
+  }
+  if (path === "gallery") return { view: "gallery", huntId: null };
+  return { view: "door", huntId: null };
 }
 
 export default function App() {
-  const [view, setView] = useState<View>(getInitialView);
-
-  function navigate(v: View) {
-    setView(v);
-    window.history.pushState({}, "", `/${v}`);
-  }
+  const [route, setRoute] = useState<Route>(parseRoute);
 
   useEffect(() => {
-    function onPopState() {
-      setView(getInitialView());
-    }
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    const onPop = () => setRoute(parseRoute());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const huntView = useHuntStore((s) => s.view);
-  const apply = useHuntStore((s) => s.apply);
-  const reset = useHuntStore((s) => s.reset);
-
-  // Replay the sample stream into the store, one event at a time — the canvas renders
-  // purely from what the reducer produces (the golden rule).
+  // Connect the live stream whenever a hunt is in the URL; keep it alive across plan→run→return.
+  const connectedRef = useRef<string | null>(null);
+  const clientRef = useRef<StreamClient | null>(null);
   useEffect(() => {
-    if (view !== "territory") return;
-    reset();
-    let i = 0;
-    const id = setInterval(() => {
-      if (i >= sampleStream.length) {
-        clearInterval(id);
-        return;
-      }
-      apply(sampleStream[i++]);
-    }, 350);
-    return () => clearInterval(id);
-  }, [view, apply, reset]);
+    const id = route.huntId;
+    if (!id || connectedRef.current === id) return;
+    clientRef.current?.close();
+    useHuntStore.getState().reset();
+    // Keep the conversation across Door → plan (same hunt); start fresh for a different hunt.
+    if (useChatStore.getState().huntId !== id) {
+      useChatStore.getState().reset();
+      useChatStore.getState().bindHunt(id);
+    }
+    const client = new StreamClient(id, {
+      onEvent: (ev) => useHuntStore.getState().apply(ev),
+      getResumeSeq: () => useHuntStore.getState().view.lastSeq,
+    });
+    client.connect();
+    clientRef.current = client;
+    connectedRef.current = id;
+  }, [route.huntId]);
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "10px 18px",
-          background: "var(--ink)",
-          color: "var(--bone)",
-        }}
-      >
-        <strong style={{ letterSpacing: 0.4 }}>Pack</strong>
-        <nav style={{ display: "flex", gap: 8 }}>
-          {(["door", "territory", "gallery"] as View[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => navigate(v)}
-              style={{
-                background: view === v ? "var(--accent)" : "transparent",
-                color: view === v ? "var(--ink)" : "var(--bone)",
-                border: "1px solid var(--accent)",
-                borderRadius: 8,
-                padding: "4px 10px",
-                cursor: "pointer",
-                textTransform: "capitalize",
-              }}
-            >
-              {v}
-            </button>
-          ))}
-        </nav>
-        {view === "territory" && (
-          <span style={{ marginLeft: "auto", fontSize: 13, opacity: 0.85 }}>
-            Boundary {huntView.boundary.pct.toFixed(0)}% · {huntView.state}
-          </span>
-        )}
-      </header>
-
-      <main style={{ flex: 1, minHeight: 0 }}>
-        {view === "door" && <DoorPage />}
-        {view === "plan" && <PlanPage />}
-        {view === "territory" && <Territory view={huntView} />}
-        {view === "gallery" && <StatesGallery />}
-      </main>
-    </div>
-  );
+  if (route.view === "door") return <DoorPage />;
+  if (route.view === "hunt") return <HuntScreen />;
+  if (route.view === "tracks") return <TracksPage huntId={route.huntId ?? ""} />;
+  if (route.view === "scorecard") return <ScorecardPage huntId={route.huntId ?? ""} />;
+  return <StatesGallery />;
 }

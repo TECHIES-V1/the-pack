@@ -30,6 +30,7 @@ def test_fixtures_exist() -> None:
         "flow_b_meeting.jsonl",
         "boundary_halt.jsonl",
         "standoff_stray.jsonl",
+        "living_canvas.jsonl",
     }, f"unexpected fixture set: {names}"
 
 
@@ -53,9 +54,9 @@ def test_seq_strictly_increasing_per_hunt(path: Path) -> None:
         by_hunt.setdefault(ev["hunt_id"], []).append(ev["seq"])
     for hunt_id, seqs in by_hunt.items():
         assert seqs[0] == 0, f"{path.name}: {hunt_id} must start at seq 0"
-        assert seqs == list(range(len(seqs))), (
-            f"{path.name}: {hunt_id} seq not contiguous-increasing"
-        )
+        assert seqs == list(
+            range(len(seqs))
+        ), f"{path.name}: {hunt_id} seq not contiguous-increasing"
 
 
 @pytest.mark.parametrize("path", FIXTURE_FILES, ids=lambda p: p.name)

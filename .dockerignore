@@ -1,0 +1,12 @@
+# Keep build contexts small and keep secrets/artifacts out of images.
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/node_modules
+**/dist
+gateway/target
+**/.env
+**/.env.*

@@ -25,7 +25,6 @@ interface OneBoxProps {
 export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange }: OneBoxProps) {
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [mode, setMode] = useState<Mode>("Signal");
   const [modeOpen, setModeOpen] = useState(false);
@@ -97,14 +96,11 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
   }
 
   function handleSubmit() {
-    if (submitting || !canSubmit) return;
-    setSubmitting(true);
-    setTimeout(() => {
-      onSubmit?.({ text: value, attachments, mode });
-      setValue("");
-      setAttachments([]);
-      setSubmitting(false);
-    }, 900);
+    if (!canSubmit) return;
+    onSubmit?.({ text: value, attachments, mode });
+    setValue("");
+    setAttachments([]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   }
 
   const canSubmit = value.trim().length > 0 || attachments.length > 0;
@@ -295,22 +291,16 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
           {/* Submit */}
           <motion.button
             onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
+            disabled={!canSubmit}
             whileTap={canSubmit ? { scale: 0.92 } : {}}
-            className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit && !submitting
+            className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit
               ? "bg-white text-door-bg cursor-pointer"
               : "bg-door-border text-door-dim cursor-default"
               }`}
           >
-            {submitting ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="animate-spin">
-                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </motion.button>
         </div>
       </div>

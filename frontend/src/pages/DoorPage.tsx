@@ -4,6 +4,11 @@ import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
+import { StrategyPicker } from "@/components/composer/StrategyPicker";
+import { DenDrawer } from "@/components/den/DenDrawer";
+import { ChatThread } from "@/components/chat/ChatThread";
+import { api, type IntakeTurn, type StrategyName } from "@/net/api";
+import { useChatStore } from "@/store/chatStore";
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -18,7 +23,7 @@ function mockHuntId() {
 }
 
 function goToPlan(huntId: string) {
-  window.history.pushState({}, "", `/plan/${huntId}`);
+  window.history.pushState({}, "", `/hunt/${huntId}/plan`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
@@ -28,7 +33,51 @@ export function DoorPage() {
   const [prefill, setPrefill] = useState<string | undefined>();
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
+  const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { turns, pending, proposal, addUser, addAlpha, setPending, propose, clearProposal, bindHunt } =
+    useChatStore();
+  const chatting = turns.length > 0 || pending;
+
+  // Front-door clarify-gate: Alpha talks normally and only PROPOSES a hunt once there's a real job.
+  // Nothing launches until the Packmaster confirms (see confirmSend).
+  async function handleSend(text: string) {
+    const convo: IntakeTurn[] = [...turns, { role: "user" as const, text }].map((t) => ({
+      role: t.role === "alpha" ? "assistant" : "user",
+      content: t.text,
+    }));
+    addUser(text);
+    clearProposal();
+    setPending(true);
+    try {
+      const { reply, ready, brief } = await api.intake(convo);
+      if (ready) {
+        propose(brief);
+        addAlpha(reply?.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
+      } else {
+        addAlpha(reply);
+      }
+    } catch {
+      addAlpha("I couldn't reach you just now — try me again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function confirmSend() {
+    if (!proposal) return;
+    const brief = proposal.brief;
+    clearProposal();
+    addAlpha("On it — taking you to the plan…");
+    try {
+      const { hunt_id } = await api.createHunt({ input: brief, source: "typed", strategy });
+      bindHunt(hunt_id);
+      goToPlan(hunt_id);
+    } catch {
+      goToPlan(mockHuntId());
+    }
+  }
 
   function showFolderToast() {
     if (folderToastTimer.current) clearTimeout(folderToastTimer.current);
@@ -41,10 +90,47 @@ export function DoorPage() {
     if (files.length > 0) setAlphaFile(files[0]);
   }
 
+  const composer = (
+    <OneBox
+      droppedFiles={droppedFiles}
+      prefill={prefill}
+      placeholder={chatting ? "Talk to Alpha…" : "What should the pack hunt down?"}
+      onFilesAdded={(files) => setAlphaFile(files[0])}
+      onFileRemoved={(name) => {
+        if (alphaFile?.name === name) setAlphaFile(null);
+      }}
+      onFolderRejected={showFolderToast}
+      onRecordingChange={setRecording}
+      onSubmit={({ text }) => handleSend(text)}
+    />
+  );
+
+  // The launch CTA — a soft, scoped suggested-action chip near the input (NN/g prompt controls),
+  // not a jarring button block. Typing instead just keeps the conversation going (re-clarifies).
+  const launchChip = proposal ? (
+    <div className="w-[min(760px,92vw)] shrink-0 flex flex-col gap-2 mb-2.5 px-1">
+      <div className="flex items-center gap-2.5">
+        <span className="text-[12px] text-[#71717a]">Mode</span>
+        <StrategyPicker value={strategy} onChange={setStrategy} />
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={confirmSend}
+          className="group inline-flex items-center gap-2 bg-[#e6a23c]/15 text-[#e6a23c] border border-[#e6a23c]/40 rounded-full pl-3.5 pr-4 py-2 text-[13px] font-medium hover:bg-[#e6a23c]/25 transition-colors cursor-pointer"
+        >
+          <span className="text-[15px] leading-none">▸</span>
+          Send the pack on this
+        </button>
+        <span className="text-[12px] text-[#71717a]">or tell me what to tweak</span>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
-      <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-auto">
-        <header className="sticky top-0 z-10 px-7 py-5 bg-door-bg">
+      <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
+        <DenDrawer />
+        <header className="shrink-0 px-7 py-5 bg-door-bg">
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -55,92 +141,91 @@ export function DoorPage() {
           </motion.span>
         </header>
 
-        <main className="flex-1 flex flex-col items-center justify-center px-4 pb-[8vh]">
-          <motion.h1
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
-            className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-10 md:mb-16"
-          >
-            What should the pack hunt down?
-          </motion.h1>
+        {chatting ? (
+          /* ---------- Chat surface: ChatThread is the only scroller; composer pinned below ------ */
+          <main className="flex-1 min-h-0 flex flex-col items-center px-4 pb-6">
+            <ChatThread className="w-[min(760px,92vw)] flex-1 min-h-0 py-6" />
+            {launchChip}
+            <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
+          </main>
+        ) : (
+          /* ---------- Empty state: the hero (heading + composer + chips) ---------- */
+          <main className="flex-1 flex flex-col items-center justify-center px-4 pb-[8vh] overflow-auto">
+            <motion.h1
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+              className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-10 md:mb-16"
+            >
+              What should the pack hunt down?
+            </motion.h1>
 
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1, ease: [0.2, 0.8, 0.2, 1] }}
-            className="w-[min(880px,90vw)] flex flex-col gap-2"
-          >
-            {/* Folder rejection toast */}
-            <AnimatePresence>
-              {folderToast && (
-                <motion.p
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.2 }}
-                  className="text-[12px] text-amber-400 m-0 px-1"
-                >
-                  Folders can't be added — only files are supported.
-                </motion.p>
-              )}
-            </AnimatePresence>
-
-            <OneBox
-              droppedFiles={droppedFiles}
-              prefill={prefill}
-              onFilesAdded={(files) => setAlphaFile(files[0])}
-              onFileRemoved={(name) => {
-                if (alphaFile?.name === name) setAlphaFile(null);
-              }}
-              onFolderRejected={showFolderToast}
-              onRecordingChange={setRecording}
-              onSubmit={({ text }) => {
-                const huntId = mockHuntId();
-                console.log("Submitting hunt:", { text, huntId });
-                goToPlan(huntId);
-              }}
-            />
-
-            <AnimatePresence>
-              {alphaFile && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <AlphaReactionSheet
-                    file={alphaFile}
-                    onDismiss={() => setAlphaFile(null)}
-                    onAction={(_action: string) => {
-                      setAlphaFile(null);
-                      goToPlan(mockHuntId());
-                    }}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Chips — horizontal scroll on mobile, row on desktop */}
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-              className="flex gap-3 overflow-x-auto pb-1 scrollbar-none"
+              transition={{ duration: 0.5, delay: 0.1, ease: [0.2, 0.8, 0.2, 1] }}
+              className="w-[min(880px,90vw)] flex flex-col gap-2"
             >
-              {INSTINCT_CHIPS.map((chip) => (
-                <InstinctChip
-                  key={chip.title}
-                  title={chip.title}
-                  subtitle={chip.subtitle}
-                  onClick={() => setPrefill(chip.title)}
-                  disabled={recording}
-                />
-              ))}
+              <AnimatePresence>
+                {folderToast && (
+                  <motion.p
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.2 }}
+                    className="text-[12px] text-amber-400 m-0 px-1"
+                  >
+                    Folders can't be added — only files are supported.
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              {composer}
+
+              <div className="flex items-center gap-2.5 px-1 pt-0.5">
+                <span className="text-[12px] text-[#71717a]">How should they hunt?</span>
+                <StrategyPicker value={strategy} onChange={setStrategy} disabled={recording} />
+              </div>
+
+              <AnimatePresence>
+                {alphaFile && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <AlphaReactionSheet
+                      file={alphaFile}
+                      onDismiss={() => setAlphaFile(null)}
+                      onAction={(_action: string) => {
+                        setAlphaFile(null);
+                        goToPlan(mockHuntId());
+                      }}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                className="flex gap-3 overflow-x-auto pb-1 scrollbar-none"
+              >
+                {INSTINCT_CHIPS.map((chip) => (
+                  <InstinctChip
+                    key={chip.title}
+                    title={chip.title}
+                    subtitle={chip.subtitle}
+                    onClick={() => setPrefill(chip.title)}
+                    disabled={recording}
+                  />
+                ))}
+              </motion.div>
             </motion.div>
-          </motion.div>
-        </main>
+          </main>
+        )}
       </div>
     </DropHalo>
   );

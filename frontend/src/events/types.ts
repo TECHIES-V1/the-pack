@@ -13,6 +13,7 @@ export type EventType =
   | "step_started"
   | "step_completed"
   | "message_passed"
+  | "wolf_progress"
   | "tool_called"
   | "tool_result"
   | "tokens_spent"

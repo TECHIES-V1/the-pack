@@ -46,6 +46,22 @@ describe("reducer over the fixture pack", () => {
     expect(state.wolves["scout-1"].status).toBe("done");
   });
 
+  it("living canvas: per-wolf live text, sources, spend, and strategy land on the view", () => {
+    const state = reduceAll(load("living_canvas.jsonl"));
+    expect(state.state).toBe("returned");
+    expect(state.finalArtifactId).toBe("art_lc_final");
+    expect(state.plan?.strategy).toBe("orchestrate");
+
+    const scout = state.wolves["scout-1"];
+    expect(scout.status).toBe("done"); // handoff after completion doesn't resurrect it to "talking"
+    expect(scout.sources).toBe(3); // from tool_result hits
+    expect(scout.spendUsd).toBeCloseTo(0.02, 2); // per-wolf spend
+    expect(scout.liveText).toBe("Reading 3 sources"); // last wolf_progress beat is retained
+
+    expect(state.wolves["tracker"].status).toBe("done");
+    expect(state.boundary.cumulativeUsd).toBeCloseTo(0.3, 2);
+  });
+
   it("is a pure function: replays identically and ignores stale seq", () => {
     const events = load("flow_b_meeting.jsonl");
     const once = reduceAll(events);
