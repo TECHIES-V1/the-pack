@@ -9,6 +9,7 @@ Wolf can never dispatch a call that escaped the gate.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from app.qwen.client import QwenClient
@@ -31,6 +32,7 @@ class Wolf:
         *,
         messages: list[dict] | None = None,
         response_schema: dict | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> CompletionResult:
         spec = CallSpec(
             hunt_id=self.hunt_id,
@@ -41,4 +43,4 @@ class Wolf:
             response_schema=response_schema,
             intent=intent,
         )
-        return await self.client.complete(spec)
+        return await self.client.complete(spec, on_delta)

@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from openai import (
     APIConnectionError,
@@ -40,6 +40,10 @@ from app.qwen.types import CallSpec, CompletionResult
 # Errors worth retrying: transient/transport/5xx/rate-limit. Never 4xx (bad request) —
 # retrying a malformed call just wastes budget.
 _TRANSIENT = (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)
+
+# A streaming sink the caller (Supervisor) supplies to observe text as it arrives, so it can
+# emit throttled `wolf_progress` beats to the canvas. None => no streaming observation.
+OnDelta = Callable[[str], Awaitable[None]]
 
 
 class CircuitOpenError(RuntimeError):
@@ -91,13 +95,21 @@ class QwenClient:
         except KeyError as exc:  # pragma: no cover - guardrail
             raise ValueError(f"unknown model tier: {tier!r}") from exc
 
-    async def complete(self, spec: CallSpec) -> CompletionResult:
-        """Run one completion through the chokepoint. Offline → FakeQwen; online → Qwen."""
-        if self.offline:
-            return await self._fake.complete(spec)
-        return await self._complete_real(spec)
+    async def complete(
+        self, spec: CallSpec, on_delta: OnDelta | None = None
+    ) -> CompletionResult:
+        """Run one completion through the chokepoint. Offline → FakeQwen; online → Qwen.
 
-    async def _complete_real(self, spec: CallSpec) -> CompletionResult:
+        `on_delta`, if given, is awaited with each text fragment as it streams (and once with
+        the full text for non-streamed calls), so the Supervisor can narrate live progress.
+        """
+        if self.offline:
+            return await self._fake.complete(spec, on_delta)
+        return await self._complete_real(spec, on_delta)
+
+    async def _complete_real(
+        self, spec: CallSpec, on_delta: OnDelta | None = None
+    ) -> CompletionResult:
         model = self._model(spec.tier)
         extra_body: dict = {}
         if spec.thinking:
@@ -113,9 +125,9 @@ class QwenClient:
             self._breaker.before()
             try:
                 if must_stream:
-                    result = await self._stream(model, spec, extra_body, response_format)
+                    result = await self._stream(model, spec, extra_body, response_format, on_delta)
                 else:
-                    result = await self._once(model, spec, extra_body, response_format)
+                    result = await self._once(model, spec, extra_body, response_format, on_delta)
                 self._breaker.on_success()
                 return result
             except _TRANSIENT as exc:  # retry these
@@ -137,7 +149,12 @@ class QwenClient:
         }
 
     async def _once(
-        self, model: str, spec: CallSpec, extra_body: dict, response_format: dict | None
+        self,
+        model: str,
+        spec: CallSpec,
+        extra_body: dict,
+        response_format: dict | None,
+        on_delta: OnDelta | None = None,
     ) -> CompletionResult:
         resp = await self._client.chat.completions.create(  # type: ignore[union-attr]
             model=model,
@@ -146,11 +163,18 @@ class QwenClient:
             response_format=response_format,
         )
         text = resp.choices[0].message.content or ""
+        if on_delta and text:  # non-streamed call still surfaces one progress beat
+            await on_delta(text)
         usage = resp.usage
         return self._account(spec, model, text, usage.prompt_tokens, usage.completion_tokens)
 
     async def _stream(
-        self, model: str, spec: CallSpec, extra_body: dict, response_format: dict | None
+        self,
+        model: str,
+        spec: CallSpec,
+        extra_body: dict,
+        response_format: dict | None,
+        on_delta: OnDelta | None = None,
     ) -> CompletionResult:
         chunks: list[str] = []
         in_tokens = out_tokens = 0
@@ -164,7 +188,10 @@ class QwenClient:
         )
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
-                chunks.append(chunk.choices[0].delta.content)
+                delta = chunk.choices[0].delta.content
+                chunks.append(delta)
+                if on_delta:
+                    await on_delta(delta)
             if getattr(chunk, "usage", None):  # final chunk carries usage
                 in_tokens = chunk.usage.prompt_tokens
                 out_tokens = chunk.usage.completion_tokens
