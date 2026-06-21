@@ -44,6 +44,20 @@ export function MarkdownReply({ text }: { text: string }) {
           <blockquote className="my-2 border-l-2 border-[#404040] pl-3 text-[#a1a1aa]">{children}</blockquote>
         ),
         hr: () => <hr className="my-3 border-[#2a2a2a]" />,
+        table: ({ children }) => (
+          <div className="my-3 overflow-x-auto">
+            <table className="w-full text-left border-collapse text-[0.9em]">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="text-[#a1a1aa]">{children}</thead>,
+        th: ({ children }) => (
+          <th className="border-b border-[#3a3a3a] px-2.5 py-1.5 font-semibold text-white align-top">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="border-b border-[#222] px-2.5 py-1.5 align-top">{children}</td>
+        ),
       }}
     >
       {text}

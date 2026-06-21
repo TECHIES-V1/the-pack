@@ -4,6 +4,7 @@
 export function stripDashes(text: string): string {
   if (!text) return text;
   return text
-    .replace(/\s*[—–―]\s+/g, ", ") // " — word"  ->  ", word"
-    .replace(/[—–―]/g, "-"); // any remaining em/en/horizontal bar -> hyphen
+    .replace(/\s*[—–―]\s*/g, ", ") // em/en dash (spaced or not) -> comma: "Alpha — lead" / "pro—con"
+    .replace(/,\s*,/g, ",") // tidy any accidental double commas
+    .replace(/,\s*\./g, "."); // ", ." -> "."
 }

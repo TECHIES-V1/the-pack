@@ -1,31 +1,12 @@
-// DocumentView — the Return (Doc 02 §S4). The final brief takes center; the canvas has
-// receded. Real drafted text from the engine; Download/Copy/Save-as-Instinct are wired.
-// Click-to-trace sources are representative until the Howler/Tracker span map exists (NEXT).
+// DocumentView — the Return (Doc 02 §S4). The final brief takes center; the canvas has receded.
+// Renders the engine's real drafted text as Markdown (headings, lists, bold, and tables like the
+// Span Map). Em-dashes are cleansed. Download / Copy / Save-as-Instinct are wired.
 
 import { useEffect, useState } from "react";
 import { LuDownload, LuCopy, LuEllipsis, LuX } from "react-icons/lu";
+import { MarkdownReply } from "@/components/chat/MarkdownReply";
+import { stripDashes } from "@/lib/text";
 import { api } from "@/net/api";
-
-interface Source {
-  n: number;
-  label: string;
-  by: string;
-  verified: boolean;
-  timestamp?: string;
-}
-
-const SOURCES: Source[] = [
-  { n: 1, label: "CBN Annual Report 2025", by: "Scout-1", verified: true },
-  { n: 2, label: "EFInA Financial Inclusion Survey 2025", by: "Scout-2", verified: true, timestamp: "04:22" },
-  { n: 3, label: "BNPL Coverage", by: "Scout-3", verified: false },
-];
-
-const SAMPLE_BODY = [
-  "A claim circulating in Nigerian fintech circles — that the country has over 5 million active BNPL users as of 2025 — cannot be verified against any primary source. Two authoritative figures tell a different story.",
-  "The Central Bank of Nigeria's most recent data puts active BNPL users at 2.1 million. A separate 2025 survey by EFInA estimates 3.4 million. The 5 million figure traces back to no identifiable primary source.",
-  "The discrepancy matters. Until a primary source surfaces for the higher figure, it should be treated as unverified.",
-];
-const SAMPLE_TITLE = "BNPL in Nigeria: The 5 Million User Claim Doesn't Add Up";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
@@ -44,7 +25,6 @@ function download(name: string, text: string) {
 
 export function DocumentView({ huntId }: { huntId: string }) {
   const [menu, setMenu] = useState(false);
-  const [source, setSource] = useState<Source | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -53,16 +33,21 @@ export function DocumentView({ huntId }: { huntId: string }) {
       .getArtifact(huntId)
       .then((a) => {
         const t = (a.content as { text?: string } | null)?.text;
-        if (typeof t === "string" && t.trim()) setDraft(t.trim());
+        if (typeof t === "string" && t.trim()) setDraft(stripDashes(t.trim()));
       })
       .catch(() => {});
   }, [huntId]);
 
-  const title = draft
-    ? draft.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "").slice(0, 120) || "The Pack's brief"
-    : SAMPLE_TITLE;
-  const paragraphs = draft ? draft.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean) : SAMPLE_BODY;
-  const fullText = `# ${title}\n\n${paragraphs.join("\n\n")}`;
+  // Title = the first non-empty line (its own heading); body = everything after, so the title
+  // never prints twice.
+  const lines = draft ? draft.split("\n") : [];
+  const firstIdx = lines.findIndex((l) => l.trim());
+  const title =
+    firstIdx >= 0
+      ? lines[firstIdx].replace(/^#+\s*/, "").replace(/\*\*/g, "").trim().slice(0, 160) || "The Pack's brief"
+      : "The Pack's brief";
+  const body = firstIdx >= 0 ? lines.slice(firstIdx + 1).join("\n").trim() : "";
+  const fullText = draft ?? "";
 
   function flash(msg: string) {
     setToast(msg);
@@ -112,64 +97,25 @@ export function DocumentView({ huntId }: { huntId: string }) {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        <article className="flex-1 overflow-y-auto px-6 py-10 scrollbar-subtle">
-          <div className="max-w-[720px] mx-auto flex flex-col gap-5">
-            <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
-            <p className="text-[13px] text-[#71717a] m-0">Researched and drafted by Pack · The Newsroom</p>
-            {paragraphs.map((p, i) => (
-              <p key={i} className="text-[15px] leading-7 text-[#d4d4d8] m-0">{p}</p>
-            ))}
-            <h2 className="text-[15px] font-medium mt-4 mb-1">Sources</h2>
-            <ol className="m-0 pl-5 flex flex-col gap-1.5">
-              {SOURCES.map((s) => (
-                <li key={s.n} className="text-[13px]">
-                  <button
-                    onClick={() => setSource(s)}
-                    className="text-[#5b9bd5] hover:underline bg-transparent border-none p-0 cursor-pointer text-left"
-                  >
-                    {s.label}
-                  </button>
-                  <span className="text-[#71717a]"> — {s.by}{s.verified ? "" : " · flagged as unverified"}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </article>
-
-        {source && (
-          <aside className="w-[320px] shrink-0 border-l border-[#2a2a2a] bg-[#1A1A1A] p-5 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[14px] font-medium m-0">Source</h3>
-              <button className="text-[#a1a1aa] hover:text-white" onClick={() => setSource(null)}><LuX size={16} /></button>
+      <article className="flex-1 overflow-y-auto px-6 py-10 scrollbar-subtle">
+        <div className="max-w-[760px] mx-auto">
+          <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
+          <p className="text-[13px] text-[#71717a] mt-2 mb-6">Researched and drafted by Pack</p>
+          {draft ? (
+            <div className="text-[15px] leading-7 text-[#d4d4d8]">
+              <MarkdownReply text={body} />
             </div>
-            <Field label="Source name" value={source.label} />
-            <Field label="Brought back by" value={source.by} />
-            {source.timestamp && <Field label="Recording timestamp" value={source.timestamp} />}
-            <Field
-              label="Verification status"
-              value={source.verified ? "Verified against the source" : "Flagged — unverified"}
-              tone={source.verified ? "ok" : "warn"}
-            />
-          </aside>
-        )}
-      </div>
+          ) : (
+            <p className="text-[14px] text-[#71717a]">Bringing back the brief…</p>
+          )}
+        </div>
+      </article>
 
       {toast && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#1A1A1A] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px]">
           {toast}
         </div>
       )}
-    </div>
-  );
-}
-
-function Field({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" }) {
-  const color = tone === "warn" ? "text-[#e6a23c]" : tone === "ok" ? "text-[#3fb27f]" : "text-[#d4d4d8]";
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wide text-[#71717a]">{label}</span>
-      <span className={`text-[13px] ${color}`}>{value}</span>
     </div>
   );
 }
