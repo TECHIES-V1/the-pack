@@ -32,19 +32,28 @@ export function DoorPage() {
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { turns, pending, proposal, addUser, addAlpha, setPending, propose, clearProposal, bindHunt } =
-    useChatStore();
+  const {
+    turns,
+    pending,
+    proposal,
+    addUser,
+    addAlpha,
+    setPending,
+    propose,
+    clearProposal,
+    bindHunt,
+    dropLastAlpha,
+    truncateFrom,
+  } = useChatStore();
   const chatting = turns.length > 0 || pending;
 
   // Front-door clarify-gate: Alpha talks normally and only PROPOSES a hunt once there's a real job.
   // Nothing launches until the Packmaster confirms (see confirmSend).
-  async function handleSend(text: string) {
-    const convo: IntakeTurn[] = [...turns, { role: "user" as const, text }].map((t) => ({
+  async function runIntake() {
+    const convo: IntakeTurn[] = useChatStore.getState().turns.map((t) => ({
       role: t.role === "alpha" ? "assistant" : "user",
       content: t.text,
     }));
-    addUser(text);
-    clearProposal();
     setPending(true);
     try {
       const { reply, ready, brief } = await api.intake(convo);
@@ -59,6 +68,26 @@ export function DoorPage() {
     } finally {
       setPending(false);
     }
+  }
+
+  async function handleSend(text: string) {
+    addUser(text);
+    clearProposal();
+    await runIntake();
+  }
+
+  // Regenerate: drop Alpha's last reply and re-answer the same prompt.
+  async function handleRegenerate() {
+    dropLastAlpha();
+    await runIntake();
+  }
+
+  // Edit & resend: pull the prompt back into the composer and trim the thread to before it.
+  function handleEdit(index: number) {
+    const turn = useChatStore.getState().turns[index];
+    if (!turn) return;
+    setPrefill(turn.text);
+    truncateFrom(index);
   }
 
   async function confirmSend() {
@@ -172,7 +201,11 @@ export function DoorPage() {
         {chatting ? (
           /* ---------- Chat surface: ChatThread is the only scroller; composer pinned below ------ */
           <main className="flex-1 min-h-0 flex flex-col items-center px-4 pb-6">
-            <ChatThread className="w-[min(760px,92vw)] flex-1 min-h-0 py-6" />
+            <ChatThread
+              className="w-[min(760px,92vw)] flex-1 min-h-0 py-6"
+              onRegenerate={handleRegenerate}
+              onEdit={handleEdit}
+            />
             {launchChip}
             <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
           </main>

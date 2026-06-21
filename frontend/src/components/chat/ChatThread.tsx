@@ -14,6 +14,7 @@ import "lenis/dist/lenis.css";
 import { LuArrowDown } from "react-icons/lu";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { RevealedMarkdown } from "@/components/chat/RevealedMarkdown";
+import { MessageActions } from "@/components/chat/MessageActions";
 import { useChatStore } from "@/store/chatStore";
 
 const STICK_THRESHOLD = 120; // px from bottom that still counts as "at the bottom"
@@ -27,6 +28,10 @@ interface ChatThreadProps {
   footer?: ReactNode;
   /** Shown before any turns exist (e.g. the hunt rail's task bubble fallback). */
   empty?: ReactNode;
+  /** Re-run the last user turn (shown on the latest Alpha reply). */
+  onRegenerate?: () => void;
+  /** Edit & resend the user turn at this index. */
+  onEdit?: (index: number) => void;
 }
 
 export function ChatThread({
@@ -36,9 +41,15 @@ export function ChatThread({
   bubbleClass = "text-[14px]",
   footer,
   empty,
+  onRegenerate,
+  onEdit,
 }: ChatThreadProps) {
   const turns = useChatStore((s) => s.turns);
   const pending = useChatStore((s) => s.pending);
+  let lastAlpha = -1;
+  turns.forEach((t, i) => {
+    if (t.role === "alpha") lastAlpha = i;
+  });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const lenisRef = useRef<Lenis | null>(null);
@@ -100,17 +111,29 @@ export function ChatThread({
             <>
               {turns.map((t, i) =>
                 t.role === "user" ? (
-                  <div
-                    key={i}
-                    className={`bg-[#242424] rounded-2xl px-4 py-2.5 text-[#e4e4e7] self-end max-w-[85%] ${bubbleClass}`}
-                  >
-                    {t.text}
+                  <div key={i} className="group flex flex-col items-end gap-1 self-end max-w-[85%]">
+                    <div className={`bg-[#242424] rounded-2xl px-4 py-2.5 text-[#e4e4e7] ${bubbleClass}`}>
+                      {t.text}
+                    </div>
+                    <MessageActions
+                      text={t.text}
+                      role="user"
+                      onEdit={onEdit ? () => onEdit(i) : undefined}
+                    />
                   </div>
                 ) : (
-                  <div key={i} className="flex gap-2.5 items-start max-w-[90%]">
+                  <div key={i} className="group flex gap-2.5 items-start max-w-[90%]">
                     <AlphaAvatar size={avatarSize} />
-                    <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
-                      <RevealedMarkdown text={t.text} />
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
+                        <RevealedMarkdown text={t.text} />
+                      </div>
+                      <MessageActions
+                        text={t.text}
+                        role="alpha"
+                        canRegenerate={i === lastAlpha}
+                        onRegenerate={onRegenerate}
+                      />
                     </div>
                   </div>
                 ),

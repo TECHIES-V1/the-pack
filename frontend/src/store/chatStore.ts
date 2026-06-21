@@ -26,6 +26,10 @@ interface ChatStore {
   clearProposal: () => void;
   bindHunt: (huntId: string) => void;
   reset: () => void;
+  /** Drop the trailing Alpha reply so the last user turn can be re-answered (Regenerate). */
+  dropLastAlpha: () => void;
+  /** Keep turns[0..index-1]; removes that turn and everything after it (Edit & resend). */
+  truncateFrom: (index: number) => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -43,6 +47,13 @@ export const useChatStore = create<ChatStore>()(
       clearProposal: () => set({ proposal: null }),
       bindHunt: (huntId) => set({ huntId }),
       reset: () => set({ turns: [], pending: false, proposal: null, huntId: null }),
+      dropLastAlpha: () =>
+        set((s) => {
+          const t = [...s.turns];
+          if (t.length && t[t.length - 1].role === "alpha") t.pop();
+          return { turns: t, proposal: null };
+        }),
+      truncateFrom: (index) => set((s) => ({ turns: s.turns.slice(0, index), proposal: null })),
     }),
     {
       name: "pack-chat",
