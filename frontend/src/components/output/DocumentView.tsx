@@ -114,9 +114,20 @@ export function DocumentView({ huntId }: { huntId: string }) {
             <div className="absolute right-0 top-10 z-10 w-44 bg-[#1A1A1A] border border-[#2a2a2a] rounded-lg py-1 text-[13px]">
               <button
                 className="w-full text-left px-3 py-2 hover:bg-[#242424]"
-                onClick={() => {
+                onClick={async () => {
                   setMenu(false);
-                  api.saveInstinct(title, { hunt_id: huntId }).then(() => flash("Saved as instinct")).catch(() => {});
+                  try {
+                    const snap = await api.getHunt(huntId);
+                    // Store a loadable spec so re-running the instinct seeds the same task + strategy.
+                    await api.saveInstinct(snap.task || title, {
+                      task: snap.task,
+                      strategy: snap.strategy,
+                      hunt_id: huntId,
+                    });
+                    flash("Saved as instinct");
+                  } catch {
+                    flash("Couldn't save");
+                  }
                 }}
               >
                 Save as instinct

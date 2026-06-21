@@ -240,7 +240,15 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       const wolves = w
         ? patchWolf(s, wolfId, { spendUsd: w.spendUsd + Number(f<number>(ev, "cost_usd") || 0) })
         : s.wolves;
-      return { ...s, wolves, boundary: boundaryWith(s, f<number>(ev, "cumulative_usd")) };
+      // Spend resuming after a Boundary halt means the human raised the cap — leave the halt.
+      const resumed = s.state === "halted_boundary";
+      const status: BoundaryStatus = resumed ? "normal" : s.boundary.status;
+      return {
+        ...s,
+        state: resumed ? "hunting" : s.state,
+        wolves,
+        boundary: boundaryWith(s, f<number>(ev, "cumulative_usd"), status),
+      };
     }
 
     case "hold_opened":

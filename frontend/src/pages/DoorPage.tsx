@@ -18,10 +18,6 @@ const INSTINCT_CHIPS = [
   { title: "The Support Desk", subtitle: "Resolve tickets and draft replies" },
 ];
 
-function mockHuntId() {
-  return "hunt_" + Math.random().toString(36).slice(2, 10);
-}
-
 function goToPlan(huntId: string) {
   window.history.pushState({}, "", `/hunt/${huntId}/plan`);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -75,7 +71,39 @@ export function DoorPage() {
       bindHunt(hunt_id);
       goToPlan(hunt_id);
     } catch {
-      goToPlan(mockHuntId());
+      addAlpha("I couldn't reach the engine just now — make sure it's running and try again.");
+    }
+  }
+
+  // A dropped file becomes a REAL hunt: parse (or transcribe) it, then send the pack on it.
+  async function handleFileAction(action: string) {
+    const file = alphaFile;
+    if (!file) return;
+    setAlphaFile(null);
+    const t = file.type;
+    if (t.startsWith("image/") || t.startsWith("video/")) {
+      addAlpha("I can't read images or video yet — try a PDF, doc, spreadsheet, or audio file.");
+      return;
+    }
+    addAlpha(`On it — ${action.toLowerCase()} from ${file.name}.`);
+    try {
+      const isAudio = t.startsWith("audio/");
+      const parsed = isAudio ? await api.transcribe(file) : await api.parse(file);
+      const text = (parsed.text || "").trim();
+      if (!text) {
+        addAlpha("I couldn't pull any text out of that file — tell me what's in it and I'll go.");
+        return;
+      }
+      const task = `${action}. Source material from ${file.name}:\n\n${text}`.slice(0, 8000);
+      const { hunt_id } = await api.createHunt({
+        input: task,
+        source: isAudio ? "spoken" : "dropped",
+        strategy,
+      });
+      bindHunt(hunt_id);
+      goToPlan(hunt_id);
+    } catch {
+      addAlpha("I couldn't read that file just now — try again, or just tell me what's in it.");
     }
   }
 
@@ -198,10 +226,7 @@ export function DoorPage() {
                     <AlphaReactionSheet
                       file={alphaFile}
                       onDismiss={() => setAlphaFile(null)}
-                      onAction={(_action: string) => {
-                        setAlphaFile(null);
-                        goToPlan(mockHuntId());
-                      }}
+                      onAction={(action: string) => handleFileAction(action)}
                     />
                   </motion.div>
                 )}

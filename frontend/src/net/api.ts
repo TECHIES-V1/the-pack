@@ -24,6 +24,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body?: unknown) =>
   req<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 
+// Multipart (file upload) — let the browser set the boundary; never set Content-Type here.
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${ENGINE_URL}${path}`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`POST ${path} → ${res.status} ${detail}`);
+  }
+  return (await res.json()) as T;
+}
+
 // --- request/response shapes (mirror the engine's Pydantic bodies) ---------------------
 
 export type StrategyName = "orchestrate" | "deep_dive" | "critique";
@@ -92,6 +102,28 @@ export interface IntakeReply {
   ready: boolean;
   brief: string;
 }
+export interface ParsedDoc {
+  kind: string;
+  text: string;
+  chars: number;
+  filename?: string;
+}
+export interface TranscriptReply {
+  text: string;
+  provider: string;
+  duration_s: number;
+}
+export interface ScorecardRun {
+  quality: number;
+  citations: number;
+  cost_usd: number;
+  time_s: number;
+  sources: number;
+}
+export interface Scorecard {
+  lone_wolf: ScorecardRun;
+  pack: ScorecardRun;
+}
 
 // --- the surface -----------------------------------------------------------------------
 
@@ -110,11 +142,26 @@ export const api = {
   // Multi-turn: pass the conversation so far so Alpha remembers the thread.
   ask: (id: string, messages: IntakeTurn[]) =>
     post<{ reply: string }>(`/hunts/${id}/ask`, { messages }),
-  addInput: (id: string) => post<CommandAccepted>(`/hunts/${id}/inputs`),
+  addInput: (id: string, text: string, kind = "text") =>
+    post<CommandAccepted>(`/hunts/${id}/inputs`, { text, kind }),
   stop: (id: string) => post<CommandAccepted>(`/hunts/${id}/stop`),
   resume: (id: string, boundary_usd: number) =>
     post<CommandAccepted>(`/hunts/${id}/resume`, { boundary_usd }),
   benchmark: (id: string) => post<CommandAccepted>(`/hunts/${id}/benchmark`),
+  getScorecard: (id: string) =>
+    req<{ hunt_id: string; scorecard: Scorecard }>(`/hunts/${id}/scorecard`),
+  // Parse a dropped file (or URL) into text the pack can research.
+  parse: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<ParsedDoc>("/parse", form);
+  },
+  // Transcribe an uploaded audio file into text (for a new hunt from voice).
+  transcribe: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<TranscriptReply>("/transcribe", form);
+  },
   listInstincts: () => req<{ instincts: Instinct[] }>("/instincts"),
   saveInstinct: (label: string, spec: Record<string, unknown>) =>
     post<{ instinct_id: string; accepted: boolean }>("/instincts", { label, spec }),

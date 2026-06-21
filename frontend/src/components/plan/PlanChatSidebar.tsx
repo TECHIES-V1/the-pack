@@ -45,6 +45,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const hold = view.openHold;
   const resolution = pick ?? hold?.recommended ?? hold?.options[0] ?? "";
   const showPlan = view.state === "plan_ready" && view.plan;
+  const halted = view.state === "halted_boundary";
 
   async function guard(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -167,6 +168,47 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
             >
               Submit
             </button>
+          </div>
+        </div>
+      )}
+
+      {halted && (
+        <div className="shrink-0 px-4 pt-3">
+          <div className={`${PANEL} p-4 flex flex-col gap-3`}>
+            <h3 className="text-[13px] font-medium m-0 text-[#e6a23c]">Boundary reached</h3>
+            <p className="text-[12px] text-[#a1a1aa] m-0">
+              The pack paused before spending past your cap (${view.boundary.cumulativeUsd.toFixed(2)} so
+              far). Raise it to let the hunt finish.
+            </p>
+            <label className="text-[12px] text-[#a1a1aa] flex items-center gap-2">
+              New boundary $
+              <input
+                type="number"
+                step="0.25"
+                min={view.boundary.cumulativeUsd}
+                value={boundary}
+                onChange={(e) => setBoundary(Number(e.target.value))}
+                className="w-20 bg-[#0F0F0F] border border-[#2a2a2a] rounded-md px-2 py-1 text-white"
+              />
+            </label>
+            <div className="flex gap-2 self-end">
+              <button
+                onClick={() => guard(() => api.stop(huntId))}
+                disabled={busy}
+                className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[13px] cursor-pointer hover:text-white disabled:opacity-60"
+              >
+                Stop here
+              </button>
+              <button
+                onClick={() =>
+                  guard(() => api.resume(huntId, Math.max(boundary, view.boundary.cumulativeUsd + 0.25)))
+                }
+                disabled={busy}
+                className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none"
+              >
+                Raise & resume →
+              </button>
+            </div>
           </div>
         </div>
       )}

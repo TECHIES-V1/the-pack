@@ -1,36 +1,24 @@
+// PlanSidebar — the left rail on the hunt screen. Renders the REAL plan Beta proposed
+// (steps + the wolves on each, the coordination pattern), not a static blurb. Falls back to a
+// short roster while the plan is still forming.
+
 import { useState } from "react";
-import { FaStar } from "react-icons/fa";
-import { LuRoute, LuPen, LuPanelRight } from "react-icons/lu";
-import { BiSolidBarChartAlt2 } from "react-icons/bi";
-import { PiCrosshairBold } from "react-icons/pi";
+import { LuPanelRight, LuArrowLeft } from "react-icons/lu";
 import type { PlanView } from "@/events/reducer";
 
-const WOLVES = [
-  {
-    role: "Alpha",
-    desc: "Reading your task, building the plan, keeping the pack on track",
-    icon: <FaStar size={16} />,
-  },
-  {
-    role: "Beta",
-    desc: "Breaking your goal into steps before the hunt begins",
-    icon: <BiSolidBarChartAlt2 size={16} />,
-  },
-  {
-    role: "Scout",
-    desc: "Ranging ahead to find ground truth — three running at once",
-    icon: <LuRoute size={16} />,
-  },
-  {
-    role: "Tracker",
-    desc: "Reading what the Scouts bring back and giving it shape",
-    icon: <PiCrosshairBold size={16} />,
-  },
-  {
-    role: "Howler",
-    desc: "Writing the final brief and signaling the pack is done",
-    icon: <LuPen size={16} />,
-  },
+const STRATEGY_LABEL: Record<string, string> = {
+  orchestrate: "Dynamic orchestrator",
+  deep_dive: "Iterative deep-research",
+  critique: "Plan-execute-critique",
+};
+
+const ROSTER = [
+  "Alpha leads and keeps the pack on track",
+  "Beta breaks the goal into a plan",
+  "Scouts range for ground truth — in parallel",
+  "Tracker cross-references what they bring back",
+  "Sentinel challenges weak claims",
+  "Howler writes the final brief",
 ];
 
 interface Props {
@@ -39,12 +27,9 @@ interface Props {
   onBack: () => void;
 }
 
-export function PlanSidebar({
-  onApprove: _approve,
-  onBack: _back,
-  plan: _plan,
-}: Props) {
+export function PlanSidebar({ onBack, plan }: Props) {
   const [open, setOpen] = useState(true);
+  const steps = plan?.steps ?? [];
 
   if (!open) {
     return (
@@ -59,15 +44,20 @@ export function PlanSidebar({
 
   return (
     <aside className="w-[300px] shrink-0 flex flex-col bg-[#1A1A1A] text-white overflow-hidden m-2 rounded-[12px] border border-[#2a2a2a]">
-      {/* Header */}
-      <div className="px-5 pt-6 pb-6 border-b border-[#2a2a2a] flex justify-between items-start">
-        <div className="flex flex-col gap-3">
-          <h2 className="text-[16px] font-medium tracking-wide m-0 leading-none">
-            The Pack
-          </h2>
-          <span className="bg-[#404040] text-[#a1a1aa] text-[11px] font-medium px-3 py-1.5 rounded-full w-fit leading-none">
-            Ready to hunt
-          </span>
+      <div className="px-5 pt-5 pb-4 border-b border-[#2a2a2a] flex justify-between items-start">
+        <div className="flex flex-col gap-2.5">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-[12px] text-[#a1a1aa] hover:text-white bg-transparent border-none cursor-pointer p-0"
+          >
+            <LuArrowLeft size={14} /> The Den
+          </button>
+          <h2 className="text-[16px] font-medium tracking-wide m-0 leading-none">The Plan</h2>
+          {plan?.pattern && (
+            <span className="bg-[#404040] text-[#a1a1aa] text-[11px] font-medium px-3 py-1.5 rounded-full w-fit leading-none">
+              {plan.strategy ? STRATEGY_LABEL[plan.strategy] ?? plan.strategy : plan.pattern}
+            </span>
+          )}
         </div>
         <button
           onClick={() => setOpen(false)}
@@ -77,27 +67,51 @@ export function PlanSidebar({
         </button>
       </div>
 
-      {/* Wolves List */}
-      <div className="flex-1 overflow-y-auto px-5 py-6 flex flex-col gap-8 scrollbar-subtle pr-3">
-        {WOLVES.map((wolf) => (
-          <div key={wolf.role} className="flex flex-col gap-3">
-            <div className="relative w-14 h-14 flex items-center justify-center shrink-0 -ml-1">
-              <div className="absolute inset-0 rounded-full border border-white/[0.02]" />
-              <div className="absolute inset-1.5 rounded-full border border-[#404040]" />
-              <div className="relative w-9 h-9 rounded-full bg-[#1A1A1A] border border-[#727272] flex items-center justify-center text-[#404040] z-10">
-                {wolf.icon}
+      <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-5 scrollbar-subtle pr-3">
+        {steps.length > 0 ? (
+          steps.map((step, i) => (
+            <div key={step.step_id} className="flex gap-3">
+              <div className="shrink-0 w-6 h-6 rounded-full bg-[#242424] border border-[#3a3a3a] flex items-center justify-center text-[12px] text-[#a1a1aa]">
+                {i + 1}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-[13px] text-[#e4e4e7] m-0 leading-snug">{step.summary}</p>
+                {step.wolves?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {step.wolves.map((w) => (
+                      <span
+                        key={w}
+                        className="text-[10.5px] text-[#a1a1aa] bg-[#0F0F0F] border border-[#2a2a2a] rounded-full px-2 py-0.5 capitalize"
+                      >
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <h3 className="text-[14px] font-medium m-0 leading-none text-white">
-                {wolf.role}
-              </h3>
-              <p className="text-[13px] text-[#a1a1aa] m-0 leading-snug">
-                {wolf.desc}
+          ))
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-[12px] text-[#71717a] m-0">Beta is drawing up the plan…</p>
+            {ROSTER.map((line) => (
+              <p key={line} className="text-[13px] text-[#a1a1aa] m-0 leading-snug">
+                {line}
               </p>
-            </div>
+            ))}
           </div>
-        ))}
+        )}
+
+        {plan?.assumptions && plan.assumptions.length > 0 && (
+          <div className="mt-2 pt-4 border-t border-[#242424] flex flex-col gap-2">
+            <h3 className="text-[12px] text-[#71717a] m-0 uppercase tracking-wide">Assumptions</h3>
+            {plan.assumptions.map((a) => (
+              <p key={a} className="text-[12px] text-[#a1a1aa] m-0 leading-snug">
+                · {a}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </aside>
   );
