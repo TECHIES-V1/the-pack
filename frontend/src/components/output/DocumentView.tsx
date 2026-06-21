@@ -23,17 +23,46 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+interface Source {
+  n: number;
+  label: string;
+  by: string;
+  verified: boolean;
+  url?: string;
+  snippet?: string;
+}
+
+// The real source dicts the engine stores on the final artifact: {title, url, snippet, by, verified}.
+function toSources(raw: unknown): Source[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((s, i) => {
+    const o = (s ?? {}) as Record<string, unknown>;
+    return {
+      n: i + 1,
+      label: String(o.title || o.url || `Source ${i + 1}`),
+      by: String(o.by || "the pack"),
+      verified: Boolean(o.verified),
+      url: typeof o.url === "string" ? o.url : undefined,
+      snippet: typeof o.snippet === "string" ? o.snippet : undefined,
+    };
+  });
+}
+
 export function DocumentView({ huntId }: { huntId: string }) {
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  const [sources, setSources] = useState<Source[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .getArtifact(huntId)
       .then((a) => {
-        const t = (a.content as { text?: string } | null)?.text;
-        if (typeof t === "string" && t.trim()) setDraft(stripDashes(t.trim()));
+        const content = (a.content as { text?: string; sources?: unknown } | null) ?? {};
+        if (typeof content.text === "string" && content.text.trim()) {
+          setDraft(stripDashes(content.text.trim()));
+        }
+        setSources(toSources(content.sources));
       })
       .catch(() => {});
   }, [huntId]);
@@ -55,10 +84,16 @@ export function DocumentView({ huntId }: { huntId: string }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col">
+    <div className="relative h-full w-full bg-door-bg text-white font-sans flex flex-col">
       <header className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-[#2a2a2a]">
-        <span className="text-[13px] text-[#a1a1aa] truncate max-w-[60%]">{title}</span>
+        <span className="text-[13px] text-[#a1a1aa] truncate max-w-[50%]">{title}</span>
         <div className="flex items-center gap-1 relative">
+          <button
+            className="mr-1 rounded-md px-2.5 py-1 text-[12px] text-[#a1a1aa] border border-[#2a2a2a] hover:text-white cursor-pointer"
+            onClick={() => goTo("/")}
+          >
+            + New hunt
+          </button>
           <button className="p-2 text-[#a1a1aa] hover:text-white" title="Download" onClick={() => download(`${huntId}.md`, fullText)}>
             <LuDownload size={16} />
           </button>
@@ -107,6 +142,36 @@ export function DocumentView({ huntId }: { huntId: string }) {
             </div>
           ) : (
             <p className="text-[14px] text-[#71717a]">Bringing back the brief…</p>
+          )}
+
+          {sources.length > 0 && (
+            <div className="mt-10 pt-6 border-t border-[#242424]">
+              <h2 className="text-[15px] font-medium m-0 mb-3">Sources</h2>
+              <ol className="m-0 pl-5 flex flex-col gap-2.5">
+                {sources.map((s) => (
+                  <li key={s.n} className="text-[13px] leading-snug">
+                    {s.url ? (
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#5b9bd5] hover:underline"
+                      >
+                        {s.label}
+                      </a>
+                    ) : (
+                      <span className="text-[#d4d4d8]">{s.label}</span>
+                    )}
+                    <span className="text-[#71717a]">
+                      {" "}
+                      — {s.by}
+                      {s.verified ? " · read in full" : " · flagged unverified"}
+                    </span>
+                    {s.snippet && <p className="text-[12px] text-[#71717a] m-0 mt-1">{s.snippet}</p>}
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
         </div>
       </article>
