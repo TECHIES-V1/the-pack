@@ -7,6 +7,8 @@ rewards depth over breadth.
 
 from __future__ import annotations
 
+import asyncio
+
 from app.engine.strategies.base import Engine, Strategy
 
 
@@ -19,22 +21,20 @@ class DeepDiveStrategy(Strategy):
         ids = engine.scout_ids()
         queries = engine.queries()
 
-        findings = []
-        for wolf_id, query in zip(ids, queries):
-            finding = await engine.scout(wolf_id, query)
-            if finding:
-                findings.append(finding)
+        # First round: the scouts range in parallel.
+        results = await asyncio.gather(*(engine.scout(w, q) for w, q in zip(ids, queries)))
+        findings = [f for f in results if f]
 
         merged = await engine.merge(findings)
 
-        # The iterative core: name the gaps, then range again to close them.
+        # The iterative core: name the gaps, then range again (in parallel) to close them.
         gaps = await engine.find_gaps(merged)
         if gaps and ids:
             await engine.progress("alpha", "thinking", f"Found {len(gaps)} gaps — sending the pack back in.")
-            for i, gap in enumerate(gaps[:2]):
-                extra = await engine.scout(ids[i % len(ids)], gap, step_id="s1b")
-                if extra:
-                    findings.append(extra)
+            extra = await asyncio.gather(
+                *(engine.scout(ids[i % len(ids)], gap, step_id="s1b") for i, gap in enumerate(gaps[:2]))
+            )
+            findings.extend(f for f in extra if f)
             merged = await engine.merge(findings, step_id="s2b")
 
         decision = None

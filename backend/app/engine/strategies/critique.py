@@ -6,6 +6,8 @@ pack takes one corrective pass before drafting. Best when the answer must be def
 
 from __future__ import annotations
 
+import asyncio
+
 from app.engine.strategies.base import Engine, Strategy
 
 
@@ -18,11 +20,9 @@ class CritiqueStrategy(Strategy):
         ids = engine.scout_ids()
         queries = engine.queries()
 
-        findings = []
-        for wolf_id, query in zip(ids, queries):
-            finding = await engine.scout(wolf_id, query)
-            if finding:
-                findings.append(finding)
+        # The scouts range in parallel before Sentinel scrutinizes the merge.
+        results = await asyncio.gather(*(engine.scout(w, q) for w, q in zip(ids, queries)))
+        findings = [f for f in results if f]
 
         merged = await engine.merge(findings)
 

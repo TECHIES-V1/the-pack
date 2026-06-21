@@ -233,6 +233,15 @@ class Repo:
             {"instinct_id": r["instinct_id"], "label": r["label"], "spec": r["spec"]} for r in rows
         ]
 
+    async def get_instinct(self, instinct_id: str) -> dict[str, Any] | None:
+        """One saved instinct (preset) by id, or None — used to seed a hunt from the Den."""
+        row = await self._pool.fetchrow(
+            "SELECT instinct_id, label, spec FROM instincts WHERE instinct_id = $1", instinct_id
+        )
+        if row is None:
+            return None
+        return {"instinct_id": row["instinct_id"], "label": row["label"], "spec": row["spec"]}
+
     async def save_instinct(self, instinct_id: str, label: str, spec: dict[str, Any]) -> None:
         await self._pool.execute(
             """

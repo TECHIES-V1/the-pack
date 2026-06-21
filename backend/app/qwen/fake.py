@@ -20,12 +20,13 @@ from app.config import TIER_REGISTRY
 from app.qwen import pricing
 from app.qwen.types import CallSpec, CompletionResult
 
-# Synthetic token usage per tier (input, output) — research-scale so cost is visible but a
-# normal hunt stays comfortably inside a $0.50 first-hunt cap.
+# Synthetic token usage per tier (input, output) — sized so cost is visible on the Boundary
+# meter but a full multi-step hunt (scouts + merge + critique + a real Standoff + draft) stays
+# comfortably inside the $0.50 first-hunt cap. Real Qwen calls are cheaper still.
 _USAGE_BY_TIER: dict[str, tuple[int, int]] = {
-    "flash": (60_000, 12_000),
-    "plus": (85_000, 17_000),
-    "max": (40_000, 9_000),
+    "flash": (20_000, 5_000),
+    "plus": (28_000, 7_000),
+    "max": (16_000, 4_000),
 }
 
 
@@ -91,6 +92,21 @@ def _offline_result(intent: str, task: str) -> tuple[str, dict | None]:
             ]
         }
         return "Two gaps remain; sending the pack back in.", parsed
+    if intent == "standoff_challenge":
+        return f"That claim on {task} leans on a single source — it needs a second to stand.", None
+    if intent == "standoff_defend":
+        return "Fair point — I'll pull a corroborating source before it goes in the brief.", None
+    if intent == "standoff_judge":
+        return "Alpha's call: keep the claim, but only once a second source backs it.", None
+    if intent == "lone":
+        text = (
+            f"# {task}\n\nA single-pass briefing on {task}. One researcher, one read: the broad "
+            "strokes are here, but with less cross-checking and fewer sources than a full pack hunt."
+        )
+        return text, None
+    if intent == "judge":
+        # The pack should win on depth + citations — that's the whole point of the Scorecard.
+        return "Scored both briefings.", {"pack": 0.88, "lone": 0.62}
     if intent == "draft":
         text = (
             f"# Briefing: {task}\n\n"
