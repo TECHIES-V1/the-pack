@@ -1,51 +1,21 @@
-// A clear status bar for terminal hunt states — so a stopped / out-of-budget / failed hunt no
-// longer looks identical to a running one, and each comes with a real recovery action.
-
-import { api } from "@/net/api";
+// A clear status bar for terminal hunt states the chat rail doesn't already handle — so a stopped
+// or failed hunt no longer looks identical to a running one. (halted_boundary is handled by the
+// rail's "Boundary reached" panel, so it's deliberately NOT duplicated here.)
 
 function goHome() {
   window.history.pushState({}, "", "/");
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-const TERMINAL = new Set(["failed", "halted_boundary", "stopped_by_user"]);
+const SHOWN = new Set(["failed", "stopped_by_user"]);
 
-export function HuntStatusBanner({
-  state,
-  huntId,
-  boundaryUsd,
-}: {
-  state: string;
-  huntId: string;
-  boundaryUsd: number;
-}) {
-  if (!TERMINAL.has(state)) return null;
+export function HuntStatusBanner({ state }: { state: string }) {
+  if (!SHOWN.has(state)) return null;
 
-  const resume = () => {
-    const next = boundaryUsd > 0 ? Math.max(boundaryUsd * 2, boundaryUsd + 1) : 2;
-    api.resume(huntId, next).catch(() => {});
-  };
-
-  let tone = "#e6a23c";
-  let text = "";
-  let actions: { label: string; onClick: () => void; primary?: boolean }[] = [];
-
-  if (state === "failed") {
-    tone = "#eb3424";
-    text = "The pack couldn't finish this one.";
-    actions = [{ label: "Try a new hunt", onClick: goHome, primary: true }];
-  } else if (state === "halted_boundary") {
-    tone = "#e6a23c";
-    text = `Hit the spend boundary ($${boundaryUsd.toFixed(2)}) — the pack paused.`;
-    actions = [
-      { label: "Raise boundary & resume", onClick: resume, primary: true },
-      { label: "New hunt", onClick: goHome },
-    ];
-  } else if (state === "stopped_by_user") {
-    tone = "#a1a1aa";
-    text = "You stopped the hunt.";
-    actions = [{ label: "New hunt", onClick: goHome, primary: true }];
-  }
+  const failed = state === "failed";
+  const tone = failed ? "#eb3424" : "#a1a1aa";
+  const text = failed ? "The pack couldn't finish this one." : "You stopped the hunt.";
+  const action = failed ? "Try a new hunt" : "Start a new hunt";
 
   return (
     <div
@@ -55,21 +25,12 @@ export function HuntStatusBanner({
       <span className="text-[13px]" style={{ color: tone }}>
         {text}
       </span>
-      <div className="flex items-center gap-2 shrink-0">
-        {actions.map((a) => (
-          <button
-            key={a.label}
-            onClick={a.onClick}
-            className={
-              a.primary
-                ? "rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-black bg-white hover:bg-white/90 cursor-pointer border-none"
-                : "rounded-lg px-3.5 py-1.5 text-[12.5px] text-[#a1a1aa] bg-transparent border border-[#2a2a2a] hover:text-white cursor-pointer"
-            }
-          >
-            {a.label}
-          </button>
-        ))}
-      </div>
+      <button
+        onClick={goHome}
+        className="shrink-0 rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-black bg-white hover:bg-white/90 cursor-pointer border-none"
+      >
+        {action}
+      </button>
     </div>
   );
 }

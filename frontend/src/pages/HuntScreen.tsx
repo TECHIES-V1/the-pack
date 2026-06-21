@@ -45,7 +45,7 @@ export function HuntScreen() {
       transition={{ duration: 0.25 }}
       className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col"
     >
-      <HuntStatusBanner state={view.state} huntId={huntId} boundaryUsd={view.boundary.boundaryUsd} />
+      <HuntStatusBanner state={view.state} />
 
       <div className="flex-1 min-h-0 flex">
         {/* Left: the pack roster — only while planning/running, not on the Return */}
