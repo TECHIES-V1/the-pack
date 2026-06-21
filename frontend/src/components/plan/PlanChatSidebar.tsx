@@ -8,7 +8,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
-import { TypeOut } from "@/components/chat/TypeOut";
+import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { OneBox } from "@/components/composer/OneBox";
 import { api, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
@@ -185,9 +185,9 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               ) : (
                 <div key={i} className="flex gap-2 items-start">
                   <AlphaAvatar size={22} />
-                  <p className="text-[13px] leading-relaxed text-[#d4d4d8] m-0 pt-px">
-                    <TypeOut text={t.text} />
-                  </p>
+                  <div className="text-[13px] leading-relaxed text-[#d4d4d8] pt-px">
+                    <MarkdownReply text={t.text} />
+                  </div>
                 </div>
               ),
             )
