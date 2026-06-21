@@ -16,10 +16,14 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, File, Form, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from app.tools.file_parse import detect_kind, parse_bytes, parse_url
+from app.tools.redact import redact_event
+from app.tools.transcribe import TRANSCRIBER
 
 from app.bus.redis_stream import EventBus
 from app.config import settings
@@ -27,10 +31,14 @@ from app.db.pool import apply_schema, create_pool
 from app.db.repo import Repo
 from app.engine.core import Emitter
 from app.engine.ids import new_hunt_id, new_instinct_id
+from app.engine.benchmark import run_benchmark
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
 from app.engine.strategies import strategy_catalog
 from app.engine.supervisor import Supervisor
+
+# Keeps fire-and-forget background tasks (benchmarks) referenced so they aren't GC'd mid-run.
+_BACKGROUND: set[asyncio.Task] = set()
 from app.qwen.client import QwenClient
 from app.qwen.types import CallSpec
 
@@ -311,7 +319,17 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
     repo, registry = _repo(request), _registry(request)
     hunt_id = new_hunt_id()
     strategy = body.strategy or settings.default_strategy
-    await repo.create_hunt(hunt_id, body.source, body.input, strategy)
+    raw_input = body.input or ""
+
+    # Start from a saved instinct (the Den) when one is given: its spec seeds the task + strategy.
+    if body.instinct_id:
+        inst = await repo.get_instinct(body.instinct_id)
+        if inst is not None:
+            spec = inst.get("spec") or {}
+            raw_input = body.input or str(spec.get("task") or inst.get("label") or "").strip()
+            strategy = body.strategy or str(spec.get("strategy") or strategy)
+
+    await repo.create_hunt(hunt_id, body.source, raw_input, strategy)
 
     handle = registry.register(hunt_id)
     emitter = Emitter(hunt_id, repo)
@@ -322,7 +340,7 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
         request.app.state.client,
         handle.commands,
         source=body.source,
-        raw_input=body.input or "",
+        raw_input=raw_input,
         strategy=strategy,
     )
     handle.task = asyncio.create_task(supervisor.run(), name=f"hunt-{hunt_id}")
@@ -450,12 +468,20 @@ async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONRespo
     return JSONResponse(content={"reply": result.text})
 
 
+class AddInput(BaseModel):
+    text: str = Field(..., description="Text (or parsed document/transcript) to fold into the hunt.")
+    kind: str = Field("text", description="text | pdf | csv | url | audio | video")
+
+
 @app.post(
     "/hunts/{hunt_id}/inputs", status_code=202, response_model=CommandAccepted, tags=["hunts"]
 )
-async def add_input(hunt_id: str, request: Request) -> JSONResponse:
-    """The mid-hunt upload. The pack absorbs new input without restarting (handling NEXT)."""
-    ok = await _registry(request).send(hunt_id, {"type": "add_input"})
+async def add_input(hunt_id: str, body: AddInput, request: Request) -> JSONResponse:
+    """Mid-hunt input. The pack absorbs it at the next synthesis step without restarting: the
+    Supervisor persists it, emits `input_added`, and weighs it in the merge/draft."""
+    ok = await _registry(request).send(
+        hunt_id, {"type": "add_input", "text": body.text, "kind": body.kind}
+    )
     if not ok:
         return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
     return _accepted({"hunt_id": hunt_id, "accepted": True})
@@ -497,24 +523,53 @@ async def stop_hunt(hunt_id: str, request: Request) -> JSONResponse:
 @app.post(
     "/hunts/{hunt_id}/resume", status_code=202, response_model=CommandAccepted, tags=["hunts"]
 )
-async def resume_hunt(hunt_id: str, _: ResumeHunt) -> JSONResponse:
-    """Resume from the latest checkpoint with a new Boundary (resume logic is NEXT)."""
+async def resume_hunt(hunt_id: str, body: ResumeHunt, request: Request) -> JSONResponse:
+    """Resume a Boundary-halted hunt by raising the Boundary. The paused Supervisor lifts the cap
+    and continues from exactly where it stopped (the call it was about to make)."""
+    ok = await _registry(request).send(
+        hunt_id, {"type": "resume", "boundary_usd": body.boundary_usd}
+    )
+    if not ok:
+        return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
     return _accepted({"hunt_id": hunt_id, "accepted": True})
 
 
 @app.post(
     "/hunts/{hunt_id}/benchmark", status_code=202, response_model=CommandAccepted, tags=["hunts"]
 )
-async def benchmark(hunt_id: str) -> JSONResponse:
-    """Run the Lone Wolf vs the Pack (NEXT)."""
+async def benchmark(hunt_id: str, request: Request) -> JSONResponse:
+    """Run the Lone Wolf vs the Pack. Launches a background scorer that runs the task single-agent
+    and emits benchmark_started → benchmark_completed (with the Scorecard) on the hunt's stream."""
+    repo = _repo(request)
+    snap = await repo.get_hunt_snapshot(hunt_id)
+    if snap is None:
+        return JSONResponse(status_code=404, content={"detail": "hunt not found"})
+    emitter = Emitter(hunt_id, repo)
+    task = snap.get("raw_input", "") or "the task"
+    coro = run_benchmark(hunt_id, emitter, repo, request.app.state.client, task)
+    task_obj = asyncio.create_task(coro, name=f"benchmark-{hunt_id}")
+    _BACKGROUND.add(task_obj)
+    task_obj.add_done_callback(_BACKGROUND.discard)
     return _accepted({"hunt_id": hunt_id, "accepted": True})
+
+
+@app.get("/hunts/{hunt_id}/scorecard", tags=["hunts"])
+async def get_scorecard(hunt_id: str, request: Request) -> JSONResponse:
+    """The latest benchmark Scorecard for a hunt (Lone Wolf vs Pack), or 404 if none yet."""
+    events = await _repo(request).replay_events(hunt_id, 0)
+    for e in reversed(events):
+        if e.type == "benchmark_completed":
+            return JSONResponse(content={"hunt_id": hunt_id, "scorecard": e.payload["scorecard"]})
+    return JSONResponse(status_code=404, content={"detail": "no benchmark yet"})
 
 
 @app.get("/hunts/{hunt_id}/tracks/export", tags=["hunts"])
 async def export_tracks(hunt_id: str, request: Request) -> dict:
-    """Redacted Tracks export — the full event log for a hunt (PII redaction is NEXT)."""
+    """Redacted Tracks export — the full event log for a hunt, with PII masked in every payload
+    (emails, phone numbers, card-like digit runs, secret tokens)."""
     events = await _repo(request).replay_events(hunt_id, 0)
-    return {"hunt_id": hunt_id, "events": [e.model_dump() for e in events], "redacted": False}
+    redacted = [redact_event(e.model_dump()) for e in events]
+    return {"hunt_id": hunt_id, "events": redacted, "redacted": True}
 
 
 @app.get("/hunts/{hunt_id}/artifact", tags=["hunts"])
@@ -541,10 +596,59 @@ async def save_instinct(body: SaveInstinct, request: Request) -> JSONResponse:
     return _accepted({"instinct_id": instinct_id, "accepted": True})
 
 
-@app.post("/uploads", tags=["system"])
-async def signed_upload() -> dict:
-    """Signed OSS upload (private objects, signed URLs) — NEXT."""
-    return {"upload_url": "https://oss.example/signed", "object_key": "stub"}
+@app.post("/parse", tags=["hunts"])
+async def parse_document(
+    file: UploadFile | None = File(None), url: str | None = Form(None)
+) -> JSONResponse:
+    """Parse an uploaded file (pdf/csv/md/text) or a URL into plain text the pack can research.
+    Inline — no object store. The frontend feeds the returned text into createHunt or /inputs."""
+    if url:
+        try:
+            text = await parse_url(url)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"detail": f"could not fetch URL: {exc}"})
+        return JSONResponse({"kind": "url", "text": text, "chars": len(text)})
+    if file is not None:
+        data = await file.read()
+        kind = detect_kind(file.filename or "", file.content_type or "")
+        text = parse_bytes(data, kind)
+        return JSONResponse({"kind": kind, "text": text, "chars": len(text), "filename": file.filename})
+    return JSONResponse(status_code=400, content={"detail": "provide a file or a url"})
+
+
+@app.post("/transcribe", tags=["hunts"])
+async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
+    """Transcribe uploaded audio into text (for a NEW hunt from voice). The frontend then calls
+    createHunt with the transcript. Offline returns a deterministic placeholder."""
+    data = await file.read()
+    t = await TRANSCRIBER.transcribe(data, content_type=file.content_type or "")
+    return JSONResponse({"text": t.text, "provider": t.provider, "duration_s": t.duration_s})
+
+
+@app.post(
+    "/hunts/{hunt_id}/transcribe", status_code=202, response_model=CommandAccepted, tags=["hunts"]
+)
+async def transcribe_into_hunt(
+    hunt_id: str, request: Request, file: UploadFile = File(...)
+) -> JSONResponse:
+    """Transcribe audio and fold it into a RUNNING hunt: the Supervisor emits transcript_ready +
+    input_added and weighs the transcript at the next synthesis step."""
+    data = await file.read()
+    t = await TRANSCRIBER.transcribe(data, content_type=file.content_type or "")
+    ok = await _registry(request).send(
+        hunt_id,
+        {
+            "type": "add_input",
+            "text": t.text,
+            "kind": "audio",
+            "transcript": True,
+            "provider": t.provider,
+            "duration_s": t.duration_s,
+        },
+    )
+    if not ok:
+        return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
+    return _accepted({"hunt_id": hunt_id, "accepted": True})
 
 
 # NOTE: WS /hunts/:id/stream?from_seq=n is served by the RUST GATEWAY (gateway/), not here.
