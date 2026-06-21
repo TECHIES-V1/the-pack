@@ -9,6 +9,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { MarkdownReply } from "@/components/chat/MarkdownReply";
+import { MessageActions } from "@/components/chat/MessageActions";
 import { OneBox } from "@/components/composer/OneBox";
 import { api, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
@@ -25,12 +26,19 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
-  const { turns, pending, addUser, addAlpha, setPending } = useChatStore();
+  const { turns, pending, addUser, addAlpha, setPending, dropLastAlpha, truncateFrom } =
+    useChatStore();
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [prefill, setPrefill] = useState<string | undefined>();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  let lastAlpha = -1;
+  turns.forEach((t, i) => {
+    if (t.role === "alpha") lastAlpha = i;
+  });
 
   useEffect(() => {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
@@ -56,13 +64,12 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     }
   }
 
-  async function askAlpha(question: string) {
-    // Carry the whole thread so Alpha remembers what we've been talking about.
-    const history: IntakeTurn[] = [...turns, { role: "user" as const, text: question }].map((t) => ({
+  // Carry the whole thread so Alpha remembers what we've been talking about.
+  async function runAsk() {
+    const history: IntakeTurn[] = useChatStore.getState().turns.map((t) => ({
       role: t.role === "alpha" ? "assistant" : "user",
       content: t.text,
     }));
-    addUser(question);
     setPending(true);
     try {
       const { reply } = await api.ask(huntId, history);
@@ -72,6 +79,23 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     } finally {
       setPending(false);
     }
+  }
+
+  async function askAlpha(question: string) {
+    addUser(question);
+    await runAsk();
+  }
+
+  async function regenerate() {
+    dropLastAlpha();
+    await runAsk();
+  }
+
+  function editTurn(index: number) {
+    const t = useChatStore.getState().turns[index];
+    if (!t) return;
+    setPrefill(t.text);
+    truncateFrom(index);
   }
 
   return (
@@ -218,17 +242,25 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         {turns.length > 0
           ? turns.map((t, i) =>
               t.role === "user" ? (
-                <div
-                  key={i}
-                  className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8] self-end max-w-[90%]"
-                >
-                  {t.text}
+                <div key={i} className="group flex flex-col items-end gap-1 self-end max-w-[90%]">
+                  <div className="bg-[#242424] rounded-xl p-3 text-[13px] text-[#d4d4d8]">
+                    {t.text}
+                  </div>
+                  <MessageActions text={t.text} role="user" onEdit={() => editTurn(i)} />
                 </div>
               ) : (
-                <div key={i} className="flex gap-2 items-start">
+                <div key={i} className="group flex gap-2 items-start">
                   <AlphaAvatar size={22} />
-                  <div className="text-[13px] leading-relaxed text-[#d4d4d8] pt-px">
-                    <MarkdownReply text={t.text} />
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="text-[13px] leading-relaxed text-[#d4d4d8] pt-px">
+                      <MarkdownReply text={t.text} />
+                    </div>
+                    <MessageActions
+                      text={t.text}
+                      role="alpha"
+                      canRegenerate={i === lastAlpha}
+                      onRegenerate={regenerate}
+                    />
                   </div>
                 </div>
               ),
@@ -252,7 +284,11 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       </div>
 
       <div className="p-4 pt-2">
-        <OneBox placeholder="Ask Alpha anything…" onSubmit={(payload) => askAlpha(payload.text)} />
+        <OneBox
+          placeholder="Ask Alpha anything…"
+          prefill={prefill}
+          onSubmit={(payload) => askAlpha(payload.text)}
+        />
       </div>
     </aside>
   );
