@@ -86,7 +86,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           {RUNNING.has(view.state) && (
             <button
               onClick={() => guard(() => api.stop(huntId))}
-              className="text-[11px] text-[#e03a2f] hover:text-[#ff6b5e] bg-transparent border-none cursor-pointer p-0"
+              className="text-[12px] text-[#ff6b5e] border border-[#e03a2f]/50 rounded-md px-2.5 py-1 hover:bg-[#e03a2f]/15 bg-transparent cursor-pointer leading-none"
             >
               Stop
             </button>
@@ -127,9 +127,9 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
                 guard(() => api.approvePlan(huntId, { mode: "on_signal", boundary_usd: boundary }))
               }
               disabled={busy}
-              className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none"
+              className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-70 cursor-pointer border-none"
             >
-              Send the pack →
+              {busy ? "Sending the pack…" : "Send the pack →"}
             </button>
           </div>
         </div>
