@@ -22,6 +22,12 @@ interface ChatStore {
   huntId: string | null;
   addUser: (text: string) => void;
   addAlpha: (text: string) => void;
+  /** Open an empty Alpha bubble to receive streaming tokens. */
+  startAlpha: () => void;
+  /** Append a streaming token to the last Alpha turn (no backend save yet). */
+  addAlphaToken: (token: string) => void;
+  /** Strip dashes and persist the completed streaming turn to the backend. */
+  commitAlpha: () => void;
   setPending: (pending: boolean) => void;
   propose: (brief: string) => void;
   clearProposal: () => void;
@@ -53,6 +59,27 @@ export const useChatStore = create<ChatStore>()(
         set((s) => ({ turns: [...s.turns, { role: "alpha", text: clean }] }));
         const hid = get().huntId;
         if (hid) api.saveMessage(hid, "alpha", clean).catch(() => {});
+      },
+      startAlpha: () =>
+        set((s) => ({ turns: [...s.turns, { role: "alpha", text: "" }] })),
+      addAlphaToken: (token) =>
+        set((s) => {
+          const turns = [...s.turns];
+          const last = turns[turns.length - 1];
+          if (last?.role === "alpha") turns[turns.length - 1] = { role: "alpha", text: last.text + token };
+          return { turns };
+        }),
+      commitAlpha: () => {
+        const { turns, huntId } = get();
+        const last = turns[turns.length - 1];
+        if (!last || last.role !== "alpha") return;
+        const clean = stripDashes(last.text);
+        set((s) => {
+          const t = [...s.turns];
+          t[t.length - 1] = { role: "alpha", text: clean };
+          return { turns: t };
+        });
+        if (huntId) api.saveMessage(huntId, "alpha", clean).catch(() => {});
       },
       setPending: (pending) => set({ pending }),
       propose: (brief) => set({ proposal: { brief: stripDashes(brief) } }),

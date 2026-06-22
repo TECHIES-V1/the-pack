@@ -9,6 +9,24 @@
 const ENGINE_URL: string =
   import.meta.env.VITE_ENGINE_URL ?? "http://localhost:8000";
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail: string,
+  ) {
+    super(`${status}: ${detail}`);
+    this.name = "ApiError";
+  }
+  get kind(): "engine_down" | "rate_limit" | "timeout" | "content_filter" | "context_exceeded" | "unknown" {
+    if (this.status === 429) return "rate_limit";
+    if (this.status === 503 || this.status === 0) return "engine_down";
+    if (this.detail.includes("timeout")) return "timeout";
+    if (this.detail.includes("content_filter")) return "content_filter";
+    if (this.detail.includes("context_length") || this.detail.includes("context_exceeded")) return "context_exceeded";
+    return "unknown";
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${ENGINE_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -16,9 +34,50 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status} ${detail}`);
+    throw new ApiError(res.status, detail);
   }
   return (await res.json()) as T;
+}
+
+export async function* streamSSE(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): AsyncGenerator<Record<string, unknown>> {
+  let res: Response;
+  try {
+    res = await fetch(`${ENGINE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch {
+    throw new ApiError(0, "engine_down");
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new ApiError(res.status, detail);
+  }
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try { yield JSON.parse(line.slice(6)); } catch { /* skip malformed */ }
+        }
+      }
+    }
+  } finally {
+    reader.cancel();
+  }
 }
 
 const post = <T>(path: string, body?: unknown) =>
@@ -146,6 +205,9 @@ export const api = {
     req<{ messages: { role: "user" | "alpha"; text: string }[] }>(`/hunts/${id}/messages`),
   saveMessage: (id: string, role: "user" | "alpha", content: string) =>
     post<{ ok: boolean }>(`/hunts/${id}/messages`, { role, content }),
+  shareHunt: (id: string) => post<{ token: string }>(`/hunts/${id}/share`),
+  getShared: (token: string) =>
+    req<{ title: string; content: Record<string, unknown> | null }>(`/share/${token}`),
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
   approvePlan: (id: string, body: ApprovePlanBody) =>
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
