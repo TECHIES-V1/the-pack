@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.tools.file_parse import detect_kind, parse_bytes, parse_url
@@ -411,6 +412,23 @@ async def post_message(hunt_id: str, body: MessageIn, request: Request) -> JSONR
     return JSONResponse(status_code=202, content={"ok": True})
 
 
+@app.post("/hunts/{hunt_id}/share", tags=["hunts"])
+async def share_hunt(hunt_id: str, request: Request) -> JSONResponse:
+    """Mint (or reuse) a public read-only token for this hunt's brief."""
+    token = secrets.token_urlsafe(9)
+    await _repo(request).set_share_token(hunt_id, token)
+    return JSONResponse({"token": token})
+
+
+@app.get("/share/{token}", tags=["hunts"])
+async def get_share(token: str, request: Request) -> JSONResponse:
+    """Public read-only view of a shared brief (no hunt id, no chat)."""
+    data = await _repo(request).get_shared(token)
+    if data is None:
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+    return JSONResponse(content=data)
+
+
 @app.post(
     "/hunts/{hunt_id}/plan/approve", status_code=202, response_model=CommandAccepted, tags=["hunts"]
 )
@@ -507,6 +525,117 @@ async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONRespo
         )
     )
     return JSONResponse(content={"reply": result.text})
+
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+@app.post("/hunts/intake/stream", tags=["hunts"])
+async def intake_stream(body: IntakeBody, request: Request) -> StreamingResponse:
+    """SSE variant of /intake — yields `token` events as text arrives, then a `done` event
+    with the fully-parsed {reply, ready, brief} payload. The frontend streams the reply live
+    and only reacts to readiness on the done event."""
+    client: QwenClient = request.app.state.client
+    msgs = [m for m in body.messages if m.get("content")]
+    last = _last_user(msgs)
+
+    if client.offline:
+        if _looks_like_task(last):
+            reply, ready, brief = "On it — I'll get the Pack on that.", True, last.strip()[:200]
+        else:
+            reply, ready, brief = (
+                "I'm Alpha — I lead the Pack. Ask me anything, or tell me what you'd like looked into.",
+                False, "",
+            )
+        async def _offline_gen():
+            yield f"data: {json.dumps({'type': 'token', 'text': reply})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'reply': reply, 'ready': ready, 'brief': brief})}\n\n"
+        return StreamingResponse(_offline_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _on_delta(delta: str) -> None:
+        await queue.put(delta)
+
+    async def _gen():
+        async def _run() -> "CompletionResult":  # type: ignore[name-defined]
+            r = await client.complete(
+                CallSpec(
+                    hunt_id="intake", wolf_id="alpha", tier="plus", intent="intake",
+                    force_stream=True,
+                    messages=[{"role": "system", "content": _ALPHA_INTAKE}, *msgs],
+                ),
+                on_delta=_on_delta,
+            )
+            await queue.put(None)  # sentinel
+            return r
+
+        task = asyncio.create_task(_run())
+        while True:
+            delta = await queue.get()
+            if delta is None:
+                break
+            yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
+
+        result = await task
+        text = (result.text or "").strip()
+        parsed = _parse_intake(text)
+        if parsed is not None:
+            reply = str(parsed.get("reply") or "").strip() or "Tell me what you want the pack to hunt down."
+            ready = bool(parsed.get("ready"))
+            brief = str(parsed.get("brief") or "").strip()
+        else:
+            reply = text or "Tell me what you want the pack to hunt down."
+            ready = False
+            brief = ""
+        if ready and not brief:
+            brief = last.strip()[:200]
+        yield f"data: {json.dumps({'type': 'done', 'reply': reply, 'ready': ready, 'brief': brief})}\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.post("/hunts/{hunt_id}/ask/stream", tags=["hunts"])
+async def ask_stream(hunt_id: str, body: AskAlpha, request: Request) -> StreamingResponse:
+    """SSE variant of /ask — yields `token` events then a `done` event with the full reply."""
+    snap = await _repo(request).get_hunt_snapshot(hunt_id)
+    task_desc = (snap or {}).get("raw_input", "")
+    client: QwenClient = request.app.state.client
+
+    history = [m for m in body.messages if m.get("content")]
+    if not history and body.question:
+        history = [{"role": "user", "content": body.question}]
+
+    system = f"{_ALPHA_CHAT}\n\nThe hunt you're discussing is about: {task_desc or 'the current task'}."
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _on_delta(delta: str) -> None:
+        await queue.put(delta)
+
+    async def _gen():
+        async def _run() -> "CompletionResult":  # type: ignore[name-defined]
+            r = await client.complete(
+                CallSpec(
+                    hunt_id=hunt_id, wolf_id="alpha", tier="plus", intent="chat",
+                    force_stream=True,
+                    messages=[{"role": "system", "content": system}, *history],
+                ),
+                on_delta=_on_delta,
+            )
+            await queue.put(None)
+            return r
+
+        task = asyncio.create_task(_run())
+        while True:
+            delta = await queue.get()
+            if delta is None:
+                break
+            yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
+
+        result = await task
+        yield f"data: {json.dumps({'type': 'done', 'reply': result.text})}\n\n"
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 class AddInput(BaseModel):
