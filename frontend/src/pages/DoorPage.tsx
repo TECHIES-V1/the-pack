@@ -83,9 +83,6 @@ export function DoorPage() {
     proposal,
     addUser,
     addAlpha,
-    startAlpha,
-    addAlphaToken,
-    commitAlpha,
     setAbortFn,
     setPending,
     propose,
@@ -117,32 +114,24 @@ export function DoorPage() {
     const convo = withCustomInstructions<Msg>([...ctx, ...base]);
     setErrorMsg(null);
     setPending(true);
-    startAlpha();
     const ctrl = new AbortController();
     setAbortFn(() => ctrl.abort());
     try {
       let streamError: string | null = null;
-      // Intake response is JSON; only the `done` event carries meaningful content.
-      // We do open the Alpha bubble early so the user sees the thinking indicator.
+      // Intake streams the model's RAW JSON ({"reply":…,"ready":…}) as token events — NEVER render
+      // those. The pending indicator covers the wait; only the parsed `done` reply is shown.
       for await (const event of streamSSE("/hunts/intake/stream", { messages: convo }, ctrl.signal)) {
         if (event.type === "error") { streamError = ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown; break; }
-        if (event.type === "token") addAlphaToken(event.text as string);
         if (event.type === "done") {
           const reply = (event.reply as string) ?? "";
           const ready = Boolean(event.ready);
           const brief = (event.brief as string) ?? "";
-          if (ready) {
-            propose(brief);
-            addAlpha(reply.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
-            dropLastAlpha(); // remove the streaming bubble; addAlpha adds a clean one
-          } else {
-            commitAlpha();
-          }
+          if (ready) propose(brief);
+          addAlpha(ready && !reply.trim() ? `Got it — here's the hunt: "${brief}"` : reply);
         }
       }
-      if (streamError) { dropLastAlpha(); setErrorMsg(streamError); }
+      if (streamError) setErrorMsg(streamError);
     } catch (err) {
-      dropLastAlpha();
       setErrorMsg(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
       setAbortFn(null);

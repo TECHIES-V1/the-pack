@@ -46,6 +46,28 @@ _TRANSIENT = (APIConnectionError, APITimeoutError, RateLimitError, InternalServe
 OnDelta = Callable[[str], Awaitable[None]]
 
 
+def _loads_lenient(text: str) -> dict | None:
+    """Parse a model's structured-output JSON, tolerating the two things models do that strict
+    json.loads rejects: real newlines/control chars inside string values (strict=False), and a
+    stray ```fence or prose around the object. Returns None only if there's no usable object."""
+    if not text:
+        return None
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`").split("\n", 1)[-1]
+    candidates = [stripped]
+    if "{" in stripped and "}" in stripped:
+        candidates.append(stripped[stripped.find("{") : stripped.rfind("}") + 1])
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate, strict=False)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 class CircuitOpenError(RuntimeError):
     """Raised when the breaker is open — fail fast instead of hammering a dead endpoint."""
 
@@ -202,10 +224,7 @@ class QwenClient:
     ) -> CompletionResult:
         parsed: dict | None = None
         if spec.response_schema is not None:
-            try:
-                parsed = json.loads(text)
-            except json.JSONDecodeError:
-                parsed = None  # caller decides how to handle a non-JSON answer
+            parsed = _loads_lenient(text)  # caller decides how to handle a non-JSON answer
         return CompletionResult(
             text=text,
             model=model,
