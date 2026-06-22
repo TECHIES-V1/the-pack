@@ -7,7 +7,7 @@ import { OneBox } from "@/components/composer/OneBox";
 import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
-import { api, streamSSE, ApiError, type StrategyName, type HuntListItem } from "@/net/api";
+import { api, streamSSE, ApiError, type StrategyName, type HuntListItem, type Instinct } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 import { useUiStore } from "@/store/uiStore";
 import { withCustomInstructions } from "@/store/settingsStore";
@@ -57,6 +57,7 @@ export function DoorPage() {
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeHunt, setActiveHunt] = useState<HuntListItem | null>(null);
+  const [instincts, setInstincts] = useState<Instinct[]>([]);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setSettingsOpen, setDenOpen } = useUiStore();
 
@@ -67,6 +68,9 @@ export function DoorPage() {
       const found = hunts.find((h) => ACTIVE_STATES.has(h.state)) ?? null;
       setActiveHunt(found);
     }).catch(() => {});
+    // The Packmaster's saved instincts — shown on the hero so they're reusable from the front
+    // door, not buried in the Den.
+    api.listInstincts().then(({ instincts }) => setInstincts(instincts)).catch(() => {});
     // Auto-open Den when arriving from "← Home" on the canvas
     if (new URLSearchParams(window.location.search).get("den") === "open") {
       setDenOpen(true);
@@ -431,6 +435,34 @@ export function DoorPage() {
                   />
                 ))}
               </motion.div>
+
+              {instincts.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-0.5">
+                  <span className="text-[11px] uppercase tracking-wide text-[#52525b] px-1">
+                    Your saved instincts
+                  </span>
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {instincts.map((i) => (
+                      <button
+                        key={i.instinct_id}
+                        disabled={recording}
+                        onClick={() =>
+                          api
+                            .createHunt({ instinct_id: i.instinct_id, source: "typed" })
+                            .then(({ hunt_id }) => {
+                              bindHunt(hunt_id);
+                              goToPlan(hunt_id);
+                            })
+                            .catch(() => {})
+                        }
+                        className="rounded-full border border-[#2a2a2a] text-[#a1a1aa] hover:text-white hover:border-[#3a3a3a] px-3 py-1.5 text-[12px] cursor-pointer transition-colors disabled:opacity-50"
+                      >
+                        {i.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <motion.div
                 initial={{ opacity: 0 }}
