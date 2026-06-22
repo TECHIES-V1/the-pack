@@ -291,6 +291,9 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           prefill={prefill}
           onSubmit={(payload) => askAlpha(payload.text)}
         />
+        <p className="text-[10.5px] text-[#52525b] text-center mt-1.5">
+          Alpha can make mistakes. Check anything important.
+        </p>
       </div>
     </aside>
   );

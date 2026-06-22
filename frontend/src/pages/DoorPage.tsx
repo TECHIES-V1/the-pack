@@ -183,6 +183,31 @@ export function DoorPage() {
     </div>
   ) : null;
 
+  // Suggested follow-ups after an Alpha answer (NN/g: reduces effort, aids discovery). Hidden while
+  // a launch is pending or Alpha is mid-reply.
+  const lastTurn = turns[turns.length - 1];
+  const followUps =
+    !pending && !proposal && lastTurn?.role === "alpha" ? (
+      <div className="w-[min(760px,92vw)] shrink-0 flex flex-wrap gap-2 mb-2 px-1">
+        {["Tell me more", "Make it simpler", "Turn this into a hunt"].map((f) => (
+          <button
+            key={f}
+            onClick={() => handleSend(f)}
+            className="rounded-full border border-[#2a2a2a] text-[#a1a1aa] hover:text-white hover:border-[#3a3a3a] px-3 py-1.5 text-[12px] cursor-pointer transition-colors"
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
+  // Action-oriented disclaimer placed near the input (NN/g cites this placement; Claude as the model).
+  const disclaimer = (
+    <p className="text-[11px] text-[#52525b] text-center mt-1.5">
+      Alpha can make mistakes. Check anything important.
+    </p>
+  );
+
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
       <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
@@ -206,8 +231,12 @@ export function DoorPage() {
               onRegenerate={handleRegenerate}
               onEdit={handleEdit}
             />
+            {followUps}
             {launchChip}
-            <div className="w-[min(760px,92vw)] shrink-0">{composer}</div>
+            <div className="w-[min(760px,92vw)] shrink-0">
+              {composer}
+              {disclaimer}
+            </div>
           </main>
         ) : (
           /* ---------- Empty state: the hero (heading + composer + chips) ---------- */
@@ -216,10 +245,18 @@ export function DoorPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
-              className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-10 md:mb-16"
+              className="text-[24px] md:text-[36px] font-normal text-center tracking-tight m-0 mb-3"
             >
               What should the pack hunt down?
             </motion.h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.15 }}
+              className="text-[13px] md:text-[15px] text-[#71717a] text-center m-0 mb-10 md:mb-14 max-w-[540px] px-4"
+            >
+              I can research, draft, review, summarize, and dig things up. Tell me what you need.
+            </motion.p>
 
             <motion.div
               initial={{ opacity: 0, y: 12 }}
@@ -242,6 +279,7 @@ export function DoorPage() {
               </AnimatePresence>
 
               {composer}
+              {disclaimer}
 
               <div className="flex items-center gap-2.5 px-1 pt-0.5">
                 <span className="text-[12px] text-[#71717a]">How should they hunt?</span>
