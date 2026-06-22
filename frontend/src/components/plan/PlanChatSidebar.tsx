@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { MessageActions } from "@/components/chat/MessageActions";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { OneBox } from "@/components/composer/OneBox";
 import { api, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
@@ -277,12 +278,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               </div>
             )}
 
-        {pending && (
-          <div className="flex gap-2 items-center">
-            <AlphaAvatar size={22} />
-            <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-          </div>
-        )}
+        {pending && <ThinkingIndicator size={22} />}
 
         {view.state === "failed" && (
           <div className="text-[13px] text-[#e03a2f]">The pack couldn't finish this one.</div>

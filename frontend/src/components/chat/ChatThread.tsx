@@ -15,6 +15,7 @@ import { LuArrowDown } from "react-icons/lu";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { RevealedMarkdown } from "@/components/chat/RevealedMarkdown";
 import { MessageActions } from "@/components/chat/MessageActions";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useChatStore } from "@/store/chatStore";
 
 const STICK_THRESHOLD = 120; // px from bottom that still counts as "at the bottom"
@@ -145,12 +146,7 @@ export function ChatThread({
                 ),
               )}
 
-              {pending && (
-                <div className="flex gap-2.5 items-center">
-                  <AlphaAvatar size={avatarSize} />
-                  <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-                </div>
-              )}
+              {pending && <ThinkingIndicator size={avatarSize} />}
 
               {footer}
             </>
