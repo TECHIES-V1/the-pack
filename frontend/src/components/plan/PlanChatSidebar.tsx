@@ -46,6 +46,16 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
 
   useEffect(() => {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
+    // If we arrived without the conversation in memory (Den / refresh / another device), hydrate
+    // it from the hunt's saved messages.
+    if (useChatStore.getState().turns.length === 0) {
+      api
+        .getMessages(huntId)
+        .then((r) => {
+          if (r.messages.length) useChatStore.getState().hydrate(r.messages);
+        })
+        .catch(() => {});
+    }
   }, [huntId]);
 
   // Track whether the user is at the bottom (so we never yank them down while they read history).
@@ -178,41 +188,44 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         </div>
       )}
 
-      {hold && (
-        <div className="shrink-0 px-4 pt-3">
-          <div className={`${PANEL} p-4 flex flex-col gap-3`}>
-            <h3 className="text-[13px] font-medium m-0">{hold.question}</h3>
-            <div className="flex flex-col gap-2">
-              {hold.options.map((opt) => (
-                <label
-                  key={opt}
-                  className="flex items-center gap-2 text-[12px] text-[#d4d4d8] cursor-pointer"
-                >
-                  <input
-                    type="radio"
-                    name="hold"
-                    checked={resolution === opt}
-                    onChange={() => setPick(opt)}
-                  />
-                  {opt}
-                  {opt === hold.recommended && <span className="text-[#71717a]">(recommended)</span>}
-                </label>
-              ))}
+      {/* assertive: hold gates demand immediate attention from screen readers */}
+      <div aria-live="assertive" aria-atomic="true">
+        {hold && (
+          <div className="shrink-0 px-4 pt-3">
+            <div className={`${PANEL} p-4 flex flex-col gap-3`}>
+              <h3 className="text-[13px] font-medium m-0">{hold.question}</h3>
+              <div className="flex flex-col gap-2">
+                {hold.options.map((opt) => (
+                  <label
+                    key={opt}
+                    className="flex items-center gap-2 text-[12px] text-[#d4d4d8] cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="hold"
+                      checked={resolution === opt}
+                      onChange={() => setPick(opt)}
+                    />
+                    {opt}
+                    {opt === hold.recommended && <span className="text-[#71717a]">(recommended)</span>}
+                  </label>
+                ))}
+              </div>
+              <button
+                onClick={() =>
+                  guard(() =>
+                    api.resolveHold(huntId, hold.holdId, { resolution }).then(() => setPick(null)),
+                  )
+                }
+                disabled={busy}
+                className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none self-end"
+              >
+                Submit
+              </button>
             </div>
-            <button
-              onClick={() =>
-                guard(() =>
-                  api.resolveHold(huntId, hold.holdId, { resolution }).then(() => setPick(null)),
-                )
-              }
-              disabled={busy}
-              className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-60 cursor-pointer border-none self-end"
-            >
-              Submit
-            </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {halted && (
         <div className="shrink-0 px-4 pt-3">

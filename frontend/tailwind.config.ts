@@ -50,5 +50,22 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // sr-only utility — visually hidden but accessible to screen readers
+    function ({ addUtilities }: { addUtilities: (u: Record<string, Record<string, string>>) => void }) {
+      addUtilities({
+        ".sr-only": {
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: "0",
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0,0,0,0)",
+          whiteSpace: "nowrap",
+          borderWidth: "0",
+        },
+      });
+    },
+  ],
 } satisfies Config;
