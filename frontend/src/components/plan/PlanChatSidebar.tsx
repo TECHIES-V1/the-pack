@@ -169,6 +169,28 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     api.addInput(huntId, t).catch(() => {});
   }
 
+  // A file dropped on the rail is parsed and folded into the hunt as source material.
+  async function attachFileToHunt(file: File) {
+    const t = file.type;
+    if (t.startsWith("image/") || t.startsWith("video/")) {
+      addUser("📎 I can't read images or video yet — try a PDF, doc, spreadsheet, or audio file.");
+      return;
+    }
+    addUser(`📎 Reading ${file.name} into the hunt…`);
+    try {
+      const isAudio = t.startsWith("audio/");
+      const parsed = isAudio ? await api.transcribe(file) : await api.parse(file);
+      const text = (parsed.text || "").trim();
+      if (!text) {
+        addUser(`I couldn't pull any text out of ${file.name}.`);
+        return;
+      }
+      await api.addInput(huntId, `Source material from ${file.name}:\n\n${text}`.slice(0, 8000));
+    } catch {
+      addUser("I couldn't read that file just now — try again, or tell me what's in it.");
+    }
+  }
+
   async function regenerate() {
     dropLastAlpha();
     await runAsk();
@@ -403,6 +425,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               : "Ask Alpha anything…"
           }
           prefill={prefill}
+          onFilesAdded={(files) => files[0] && attachFileToHunt(files[0])}
           packAction={
             view.state === "plan_ready"
               ? {
