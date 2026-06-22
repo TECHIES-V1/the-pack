@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 from contextlib import asynccontextmanager
 
@@ -272,12 +273,27 @@ def _parse_intake(text: str) -> dict | None:
         text = text.strip("`").split("\n", 1)[-1]
     for candidate in (text, text[text.find("{") : text.rfind("}") + 1] if "{" in text else ""):
         try:
-            obj = json.loads(candidate)
+            # strict=False: models routinely put real newlines inside the string values, which
+            # the default parser rejects — that miss used to dump the raw JSON into the chat.
+            obj = json.loads(candidate, strict=False)
             if isinstance(obj, dict) and "ready" in obj:
                 return obj
         except json.JSONDecodeError:
             continue
     return None
+
+
+def _safe_reply(text: str) -> str:
+    """A reply for when intake JSON can't be parsed — never leak raw braces into the chat."""
+    if text.strip().startswith("{") or '"reply"' in text:
+        m = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+        if m:
+            try:
+                return json.loads(f'"{m.group(1)}"')
+            except json.JSONDecodeError:
+                pass
+        return "Tell me what you want the pack to hunt down."
+    return text or "Tell me what you want the pack to hunt down."
 
 
 # Alpha's CHAT voice — deliberately NOT the internal orchestrator prompt (that one is full of
@@ -501,7 +517,7 @@ async def intake(body: IntakeBody, request: Request) -> JSONResponse:
         brief = str(parsed.get("brief") or "").strip()
     else:
         # No usable JSON — treat the model's words as a normal reply and NEVER launch on a miss.
-        reply = text or "Tell me what you want the pack to hunt down."
+        reply = _safe_reply(text)
         ready = False
         brief = ""
     if ready and not brief:
@@ -608,7 +624,7 @@ async def intake_stream(body: IntakeBody, request: Request) -> StreamingResponse
             ready = bool(parsed.get("ready"))
             brief = str(parsed.get("brief") or "").strip()
         else:
-            reply = text or "Tell me what you want the pack to hunt down."
+            reply = _safe_reply(text)
             ready = False
             brief = ""
         if ready and not brief:
