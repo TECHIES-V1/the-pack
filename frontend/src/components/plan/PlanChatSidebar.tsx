@@ -35,12 +35,21 @@ const STRATEGY_LABEL: Record<string, string> = {
   critique: "Plan-execute-critique",
 };
 
+// How tightly the Packmaster holds the leash — sent to the engine at approval (it honors all three).
+type Autonomy = "on_command" | "on_signal" | "wild";
+const MODES: { value: Autonomy; label: string; blurb: string }[] = [
+  { value: "on_command", label: "On Command", blurb: "Alpha pauses at forks and checks in before he writes the brief." },
+  { value: "on_signal", label: "On Signal", blurb: "Alpha runs, but pauses when the pack genuinely disagrees." },
+  { value: "wild", label: "On Wild", blurb: "Alpha makes the calls himself and brings back the result." },
+];
+
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
   const { turns, pending, addUser, startAlpha, addAlphaToken, commitAlpha, setPending, dropLastAlpha, truncateFrom } =
     useChatStore();
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
+  const [mode, setMode] = useState<Autonomy>("on_signal");
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
@@ -188,6 +197,24 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               <li>Estimated cost · ${view.plan.est_cost.toFixed(2)}</li>
               <li>Pattern · {view.plan.pattern}</li>
             </ul>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-[#a1a1aa]">How much leash?</span>
+              <div className="flex rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] p-0.5">
+                {MODES.map((m) => (
+                  <button
+                    key={m.value}
+                    onClick={() => setMode(m.value)}
+                    aria-pressed={mode === m.value}
+                    className={`flex-1 rounded-md px-2 py-1.5 text-[11.5px] cursor-pointer border-none transition-colors ${
+                      mode === m.value ? "bg-[#2e2e2e] text-white" : "bg-transparent text-[#a1a1aa] hover:text-white"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[#71717a]">{MODES.find((m) => m.value === mode)?.blurb}</span>
+            </div>
             <label className="text-[12px] text-[#a1a1aa] flex items-center gap-2">
               Boundary $
               <input
@@ -201,7 +228,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
             </label>
             <button
               onClick={() =>
-                guard(() => api.approvePlan(huntId, { mode: "on_signal", boundary_usd: boundary }))
+                guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary }))
               }
               disabled={busy}
               className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-70 cursor-pointer border-none"

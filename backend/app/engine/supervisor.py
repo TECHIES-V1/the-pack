@@ -146,6 +146,7 @@ class Supervisor:
         self._queries: list[str] = []
         self._sources: list[dict] = []
         self._extra_inputs: list[str] = []  # mid-hunt inputs absorbed without a restart (A7)
+        self._mode = "on_signal"  # autonomy: how tightly the Packmaster holds the leash
         from app.config import settings
 
         self._step_timeout: float = settings.step_timeout_s
@@ -253,10 +254,11 @@ class Supervisor:
         effective = min(approved, settings.first_hunt_cap_usd)
         self._boundary = Boundary(boundary_usd=effective)
         await self._repo.set_boundary(self._hunt_id, effective)
+        self._mode = str(cmd.get("mode") or "on_signal")
         await self._emit(
             "plan_approved",
             "user",
-            {"mode": cmd.get("mode", "on_signal"), "boundary_usd": effective},
+            {"mode": self._mode, "boundary_usd": effective},
         )
         await self._repo.set_hunt_state(self._hunt_id, "hunting")
 
@@ -452,7 +454,8 @@ class Supervisor:
         return Merged(summary=summary, claims=claims, conflict=conflict, output_ref=out_ref, sources=sources)
 
     async def resolve_conflict(self, conflict: Conflict) -> str:
-        """Open a Hold for the human and block until they decide."""
+        """Open a Hold for the human and block until they decide — unless the Packmaster set the
+        leash to On Wild, in which case Alpha takes his own recommended call and keeps running."""
         hold_id = new_hold_id()
         await self._emit(
             "hold_opened",
@@ -465,6 +468,14 @@ class Supervisor:
                 "recommended": conflict.recommended,
             },
         )
+        if self._mode == "wild":
+            resolution = conflict.recommended
+            await self._emit(
+                "hold_resolved",
+                "alpha",
+                {"hold_id": hold_id, "resolution": resolution, "auto": True},
+            )
+            return resolution
         await self._repo.set_hunt_state(self._hunt_id, "holding")
         cmd = await self._await_command("resolve_hold")
         resolution = str(cmd.get("resolution") or conflict.recommended)
@@ -560,9 +571,35 @@ class Supervisor:
         )
         await self._repo.set_hunt_state(self._hunt_id, "hunting")
 
+    async def _confirm_draft(self) -> None:
+        """On Command only: Alpha checks in before the final write-up so the Packmaster can add
+        anything first. Loops until they say go (each pass folds in any mid-hunt input)."""
+        while True:
+            hold_id = new_hold_id()
+            await self._emit(
+                "hold_opened",
+                "alpha",
+                {
+                    "hold_id": hold_id,
+                    "question": "Ready for the pack to write up the brief?",
+                    "options": ["Write the brief", "Wait — I'll add something first"],
+                    "recommended": "Write the brief",
+                },
+            )
+            await self._repo.set_hunt_state(self._hunt_id, "holding")
+            cmd = await self._await_command("resolve_hold")
+            resolution = str(cmd.get("resolution") or "Write the brief")
+            await self._emit("hold_resolved", "user", {"hold_id": hold_id, "resolution": resolution})
+            await self._repo.set_hunt_state(self._hunt_id, "hunting")
+            await self._absorb_inputs()
+            if resolution == "Write the brief":
+                return
+
     async def draft(self, merged: Merged, decision: str | None = None, step_id: str = "s3") -> str:
         """Howler writes the final briefing from the merged claims and the chosen decision."""
         await self._absorb_inputs()  # A7: last chance to fold in mid-hunt input before drafting
+        if self._mode == "on_command":
+            await self._confirm_draft()
         howler = self._wolves["howler"]
         await self._emit(
             "step_started",
