@@ -1,8 +1,9 @@
-// The Den — a slide-in drawer of Past Hunts + Saved Instincts (Doc 02). Both come from the
-// engine: GET /hunts and GET /instincts. Empty state when the pack hasn't hunted yet.
+// The Den — a slide-in drawer of Past Hunts + Saved Instincts (Doc 02). Both come from the engine
+// (GET /hunts, GET /instincts). New-chat, keyword search, and recency grouping are client-side.
+// (Rename / delete / archive / pin need backend endpoints — flagged, not faked.)
 
-import { useEffect, useState } from "react";
-import { LuPanelLeft, LuX } from "react-icons/lu";
+import { useEffect, useMemo, useState } from "react";
+import { LuPanelLeft, LuX, LuSearch, LuPlus } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct } from "@/net/api";
 
 function goTo(path: string) {
@@ -10,11 +11,34 @@ function goTo(path: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+const DAY = 86_400_000;
+const BUCKETS: { label: string; max: number }[] = [
+  { label: "Today", max: DAY },
+  { label: "Yesterday", max: 2 * DAY },
+  { label: "Previous 7 days", max: 7 * DAY },
+  { label: "Older", max: Infinity },
+];
+
+function groupByRecency(hunts: HuntListItem[]): { label: string; items: HuntListItem[] }[] {
+  const now = Date.now();
+  return BUCKETS.map((b, i) => {
+    const min = i === 0 ? 0 : BUCKETS[i - 1].max;
+    return {
+      label: b.label,
+      items: hunts.filter((h) => {
+        const age = now - new Date(h.created_at).getTime();
+        return age >= min && age < b.max;
+      }),
+    };
+  }).filter((g) => g.items.length > 0);
+}
+
 export function DenDrawer() {
   const [open, setOpen] = useState(false);
   const [hunts, setHunts] = useState<HuntListItem[]>([]);
   const [instincts, setInstincts] = useState<Instinct[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -24,6 +48,22 @@ export function DenDrawer() {
       setLoaded(true);
     });
   }, [open]);
+
+  const ql = q.trim().toLowerCase();
+  const filteredHunts = useMemo(
+    () => (ql ? hunts.filter((h) => h.title.toLowerCase().includes(ql)) : hunts),
+    [hunts, ql],
+  );
+  const filteredInstincts = useMemo(
+    () => (ql ? instincts.filter((i) => i.label.toLowerCase().includes(ql)) : instincts),
+    [instincts, ql],
+  );
+  const huntGroups = ql ? [{ label: "Results", items: filteredHunts }] : groupByRecency(filteredHunts);
+
+  function openHunt(id: string) {
+    setOpen(false);
+    goTo(`/hunt/${id}`);
+  }
 
   return (
     <>
@@ -46,30 +86,50 @@ export function DenDrawer() {
               </button>
             </header>
 
+            <div className="px-4 pt-3 pb-2 flex flex-col gap-2 border-b border-[#2a2a2a]">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  goTo("/");
+                }}
+                className="flex items-center gap-2 rounded-lg bg-[#242424] hover:bg-[#2e2e2e] px-3 py-2 text-[13px] text-white cursor-pointer border-none"
+              >
+                <LuPlus size={15} /> New hunt
+              </button>
+              <div className="flex items-center gap-2 rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] px-2.5 py-1.5">
+                <LuSearch size={14} className="text-[#71717a] shrink-0" />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search hunts…"
+                  className="flex-1 bg-transparent border-none outline-none text-[13px] text-white placeholder:text-[#71717a]"
+                />
+              </div>
+            </div>
+
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-subtle">
-              <Section title="Past hunts">
-                {hunts.length === 0 ? (
-                  <Empty text={loaded ? "No hunts yet — send the pack." : "Loading…"} />
-                ) : (
-                  hunts.map((h) => (
-                    <Row
-                      key={h.hunt_id}
-                      title={h.title}
-                      sub={`${h.state} · ${new Date(h.created_at).toLocaleDateString()}`}
-                      onClick={() => {
-                        setOpen(false);
-                        goTo(`/hunt/${h.hunt_id}`);
-                      }}
-                    />
-                  ))
-                )}
-              </Section>
+              {huntGroups.length === 0 ? (
+                <Empty text={loaded ? (ql ? "No hunts match." : "No hunts yet — send the pack.") : "Loading…"} />
+              ) : (
+                huntGroups.map((g) => (
+                  <Section key={g.label} title={g.label}>
+                    {g.items.map((h) => (
+                      <Row
+                        key={h.hunt_id}
+                        title={h.title}
+                        sub={`${h.state} · ${new Date(h.created_at).toLocaleDateString()}`}
+                        onClick={() => openHunt(h.hunt_id)}
+                      />
+                    ))}
+                  </Section>
+                ))
+              )}
 
               <Section title="Saved instincts">
-                {instincts.length === 0 ? (
-                  <Empty text={loaded ? "No saved instincts." : "Loading…"} />
+                {filteredInstincts.length === 0 ? (
+                  <Empty text={loaded ? (ql ? "No instincts match." : "No saved instincts.") : "Loading…"} />
                 ) : (
-                  instincts.map((i) => (
+                  filteredInstincts.map((i) => (
                     <Row
                       key={i.instinct_id}
                       title={i.label}
