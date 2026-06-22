@@ -88,6 +88,15 @@ CREATE TABLE IF NOT EXISTS instincts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Feedback: thumbs up/down votes on Alpha replies (turn_index matches the chatStore turn array).
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    hunt_id     TEXT        NOT NULL,
+    turn_index  INT         NOT NULL,
+    vote        TEXT        NOT NULL CHECK (vote IN ('up', 'down')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Checkpoints: written when the Boundary halts, so a hunt can resume (real logic NEXT).
 CREATE TABLE IF NOT EXISTS checkpoints (
     checkpoint_id TEXT PRIMARY KEY,

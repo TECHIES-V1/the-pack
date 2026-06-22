@@ -133,6 +133,24 @@ class Repo:
         )
         return [{"role": r["role"], "text": r["content"]} for r in rows]
 
+    # --- sharing (public read-only link to a returned brief) ---------------------------
+
+    async def set_share_token(self, hunt_id: str, token: str) -> None:
+        await self._pool.execute(
+            "UPDATE hunts SET share_token = $2 WHERE hunt_id = $1", hunt_id, token
+        )
+
+    async def get_shared(self, token: str) -> dict[str, Any] | None:
+        row = await self._pool.fetchrow(
+            "SELECT hunt_id, title, raw_input FROM hunts WHERE share_token = $1", token
+        )
+        if row is None:
+            return None
+        artifact = await self.get_final_artifact(row["hunt_id"])
+        content = artifact["content"] if artifact else None
+        title = (row["title"] or (row["raw_input"] or "").strip()[:80]) or "A Pack brief"
+        return {"title": title, "content": content}
+
     # --- events (the log + the outbox) -------------------------------------------------
 
     async def get_last_seq(self, hunt_id: str) -> int:
@@ -307,4 +325,17 @@ class Repo:
             hunt_id,
             at_seq,
             state,
+        )
+
+    # --- feedback ----------------------------------------------------------------------
+
+    async def save_feedback(self, hunt_id: str, turn_index: int, vote: str) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO feedback (hunt_id, turn_index, vote)
+            VALUES ($1, $2, $3)
+            """,
+            hunt_id,
+            turn_index,
+            vote,
         )

@@ -638,6 +638,18 @@ async def ask_stream(hunt_id: str, body: AskAlpha, request: Request) -> Streamin
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
+class FeedbackBody(BaseModel):
+    turn_index: int
+    vote: str = Field(..., pattern="^(up|down)$")
+
+
+@app.post("/hunts/{hunt_id}/feedback", tags=["hunts"])
+async def submit_feedback(hunt_id: str, body: FeedbackBody, request: Request) -> JSONResponse:
+    """Record a thumbs-up or thumbs-down vote for one Alpha turn. Fire-and-forget from the UI."""
+    await _repo(request).save_feedback(hunt_id, body.turn_index, body.vote)
+    return JSONResponse({"ok": True})
+
+
 class AddInput(BaseModel):
     text: str = Field(..., description="Text (or parsed document/transcript) to fold into the hunt.")
     kind: str = Field("text", description="text | pdf | csv | url | audio | video")
