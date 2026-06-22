@@ -20,6 +20,7 @@ interface ChatStore {
   pending: boolean;
   proposal: { brief: string } | null;
   huntId: string | null;
+  abortFn: (() => void) | null;
   addUser: (text: string) => void;
   addAlpha: (text: string) => void;
   /** Open an empty Alpha bubble to receive streaming tokens. */
@@ -39,6 +40,8 @@ interface ChatStore {
   truncateFrom: (index: number) => void;
   /** Replace the whole thread (used to hydrate from the backend's saved messages). */
   hydrate: (turns: ChatTurn[]) => void;
+  setAbortFn: (fn: (() => void) | null) => void;
+  abortAlpha: () => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -48,6 +51,7 @@ export const useChatStore = create<ChatStore>()(
       pending: false,
       proposal: null,
       huntId: null,
+      abortFn: null,
       addUser: (text) => {
         set((s) => ({ turns: [...s.turns, { role: "user", text }] }));
         const hid = get().huntId;
@@ -94,6 +98,8 @@ export const useChatStore = create<ChatStore>()(
         }),
       truncateFrom: (index) => set((s) => ({ turns: s.turns.slice(0, index), proposal: null })),
       hydrate: (turns) => set({ turns }),
+      setAbortFn: (fn) => set({ abortFn: fn }),
+      abortAlpha: () => { get().abortFn?.(); set({ abortFn: null }); },
     }),
     {
       name: "pack-chat",

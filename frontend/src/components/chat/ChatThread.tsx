@@ -45,6 +45,8 @@ export function ChatThread({
 }: ChatThreadProps) {
   const turns = useChatStore((s) => s.turns);
   const pending = useChatStore((s) => s.pending);
+  const abortFn = useChatStore((s) => s.abortFn);
+  const abortAlpha = useChatStore((s) => s.abortAlpha);
   let lastAlpha = -1;
   turns.forEach((t, i) => {
     if (t.role === "alpha") lastAlpha = i;
@@ -139,7 +141,19 @@ export function ChatThread({
                 ),
               )}
 
-              {pending && <ThinkingIndicator size={avatarSize} />}
+              {pending && (
+                <>
+                  <ThinkingIndicator size={avatarSize} />
+                  {abortFn && (
+                    <button
+                      onClick={abortAlpha}
+                      className="self-start ml-10 text-[12px] text-[#a1a1aa] border border-[#2a2a2a] rounded-md px-2.5 py-1 hover:text-white cursor-pointer bg-transparent"
+                    >
+                      Stop reply
+                    </button>
+                  )}
+                </>
+              )}
 
               {footer}
             </>
