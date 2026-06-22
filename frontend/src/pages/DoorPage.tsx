@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useRef, useState } from "react";
+import { LuSettings } from "react-icons/lu";
 import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
@@ -7,8 +8,10 @@ import { OneBox } from "@/components/composer/OneBox";
 import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
+import { SettingsModal } from "@/components/settings/SettingsModal";
 import { api, type IntakeTurn, type StrategyName } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
+import { withCustomInstructions } from "@/store/settingsStore";
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -31,6 +34,7 @@ export function DoorPage() {
   const [folderToast, setFolderToast] = useState(false);
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const [error, setError] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
@@ -51,10 +55,12 @@ export function DoorPage() {
   // Front-door clarify-gate: Alpha talks normally and only PROPOSES a hunt once there's a real job.
   // Nothing launches until the Packmaster confirms (see confirmSend).
   async function runIntake() {
-    const convo: IntakeTurn[] = useChatStore.getState().turns.map((t) => ({
-      role: t.role === "alpha" ? "assistant" : "user",
-      content: t.text,
-    }));
+    const convo: IntakeTurn[] = withCustomInstructions(
+      useChatStore.getState().turns.map((t) => ({
+        role: t.role === "alpha" ? "assistant" : "user",
+        content: t.text,
+      })),
+    );
     setError(false);
     setPending(true);
     try {
@@ -233,6 +239,15 @@ export function DoorPage() {
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
       <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
         <DenDrawer />
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="absolute top-5 right-14 z-20 p-2 text-[#A3A3A3] hover:text-white bg-transparent border-none cursor-pointer"
+          title="Settings"
+          aria-label="Settings"
+        >
+          <LuSettings size={19} />
+        </button>
+        {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
         <header className="shrink-0 px-7 py-5 bg-door-bg">
           <motion.span
             initial={{ opacity: 0 }}

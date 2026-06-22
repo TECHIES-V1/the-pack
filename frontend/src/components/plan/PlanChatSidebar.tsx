@@ -15,6 +15,7 @@ import { OneBox } from "@/components/composer/OneBox";
 import { api, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
+import { withCustomInstructions } from "@/store/settingsStore";
 
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
 const RUNNING = new Set(["hunting", "holding", "standoff", "finishing"]);
@@ -80,10 +81,12 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
 
   // Carry the whole thread so Alpha remembers what we've been talking about.
   async function runAsk() {
-    const history: IntakeTurn[] = useChatStore.getState().turns.map((t) => ({
-      role: t.role === "alpha" ? "assistant" : "user",
-      content: t.text,
-    }));
+    const history: IntakeTurn[] = withCustomInstructions(
+      useChatStore.getState().turns.map((t) => ({
+        role: t.role === "alpha" ? "assistant" : "user",
+        content: t.text,
+      })),
+    );
     setAskError(false);
     setPending(true);
     try {
