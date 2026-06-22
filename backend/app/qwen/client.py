@@ -118,7 +118,7 @@ class QwenClient:
                 extra_body["thinking_budget"] = spec.thinking_budget
 
         response_format = self._response_format(spec)
-        must_stream = spec.thinking  # the gotcha
+        must_stream = spec.thinking or spec.force_stream  # thinking always needs stream; force_stream opts in without thinking
 
         last_exc: Exception | None = None
         for attempt in range(settings.qwen_max_retries + 1):
