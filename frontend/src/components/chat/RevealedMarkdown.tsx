@@ -4,11 +4,17 @@
 
 import { useEffect, useState } from "react";
 import { MarkdownReply } from "./MarkdownReply";
+import { useReducedMotion } from "@/lib/useReducedMotion";
 
 export function RevealedMarkdown({ text }: { text: string }) {
   const [shown, setShown] = useState(0);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
+    if (reduced) {
+      setShown(text.length); // no typewriter when the user asked for reduced motion
+      return;
+    }
     setShown(0);
     if (!text) return;
     const step = Math.max(2, Math.ceil(text.length / 50));
@@ -20,7 +26,7 @@ export function RevealedMarkdown({ text }: { text: string }) {
       });
     }, 22);
     return () => clearInterval(id);
-  }, [text]);
+  }, [text, reduced]);
 
   return <MarkdownReply text={text.slice(0, shown)} />;
 }

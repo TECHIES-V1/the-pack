@@ -8,6 +8,7 @@
 //   /gallery               states gallery (dev)
 
 import { useEffect, useRef, useState } from "react";
+import { MotionConfig } from "framer-motion";
 
 import { DoorPage } from "@/pages/DoorPage";
 import { HuntScreen } from "@/pages/HuntScreen";
@@ -68,9 +69,13 @@ export default function App() {
     connectedRef.current = id;
   }, [route.huntId]);
 
-  if (route.view === "door") return <DoorPage />;
-  if (route.view === "hunt") return <HuntScreen />;
-  if (route.view === "tracks") return <TracksPage huntId={route.huntId ?? ""} />;
-  if (route.view === "scorecard") return <ScorecardPage huntId={route.huntId ?? ""} />;
-  return <StatesGallery />;
+  let page: React.ReactNode;
+  if (route.view === "door") page = <DoorPage />;
+  else if (route.view === "hunt") page = <HuntScreen />;
+  else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} />;
+  else if (route.view === "scorecard") page = <ScorecardPage huntId={route.huntId ?? ""} />;
+  else page = <StatesGallery />;
+
+  // reducedMotion="user" → framer-motion animations are skipped when the OS asks for reduced motion.
+  return <MotionConfig reducedMotion="user">{page}</MotionConfig>;
 }

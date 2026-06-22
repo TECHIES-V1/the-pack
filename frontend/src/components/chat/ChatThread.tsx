@@ -104,7 +104,13 @@ export function ChatThread({
   return (
     <div className={`relative ${className}`}>
       <div ref={wrapperRef} className="h-full overflow-y-auto scrollbar-subtle" style={{ overflowAnchor: "none" }}>
-        <div ref={contentRef} className="flex flex-col gap-4 py-1">
+        <div
+          ref={contentRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          className="flex flex-col gap-4 py-1"
+        >
           {!hasContent ? (
             empty
           ) : (

@@ -238,7 +238,13 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       )}
 
       {/* ---- Conversation only (the activity feed lives on the canvas TraceRail) ---------- */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle">
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 scrollbar-subtle"
+      >
         {turns.length > 0
           ? turns.map((t, i) =>
               t.role === "user" ? (
