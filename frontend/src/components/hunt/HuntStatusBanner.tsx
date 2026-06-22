@@ -2,10 +2,7 @@
 // or failed hunt no longer looks identical to a running one. (halted_boundary is handled by the
 // rail's "Boundary reached" panel, so it's deliberately NOT duplicated here.)
 
-function goHome() {
-  window.history.pushState({}, "", "/");
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
+import { startNewHunt as goHome } from "@/lib/nav";
 
 const SHOWN = new Set(["failed", "stopped_by_user"]);
 

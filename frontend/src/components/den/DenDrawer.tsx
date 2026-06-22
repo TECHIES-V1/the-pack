@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2 } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct } from "@/net/api";
+import { startNewHunt } from "@/lib/nav";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
@@ -110,7 +111,7 @@ export function DenDrawer() {
               <button
                 onClick={() => {
                   setOpen(false);
-                  goTo("/");
+                  startNewHunt();
                 }}
                 className="flex items-center gap-2 rounded-lg bg-[#242424] hover:bg-[#2e2e2e] px-3 py-2 text-[13px] text-white cursor-pointer border-none"
               >

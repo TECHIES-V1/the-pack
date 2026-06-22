@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { LuDownload, LuCopy, LuEllipsis, LuX } from "react-icons/lu";
 import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { stripDashes } from "@/lib/text";
+import { startNewHunt } from "@/lib/nav";
 import { api } from "@/net/api";
 
 function goTo(path: string) {
@@ -90,7 +91,7 @@ export function DocumentView({ huntId }: { huntId: string }) {
         <div className="flex items-center gap-1 relative">
           <button
             className="mr-1 rounded-md px-2.5 py-1 text-[12px] text-[#a1a1aa] border border-[#2a2a2a] hover:text-white cursor-pointer"
-            onClick={() => goTo("/")}
+            onClick={startNewHunt}
           >
             + New hunt
           </button>
