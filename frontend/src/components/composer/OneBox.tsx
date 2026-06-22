@@ -20,9 +20,11 @@ interface OneBoxProps {
   onFolderRejected?: () => void;
   onSubmit?: (payload: { text: string; attachments: AttachedFile[]; mode: Mode }) => void;
   onRecordingChange?: (recording: boolean) => void;
+  /** Hide the Signal/On Wild/On Command autonomy dropdown (it only matters at plan-approval). */
+  hideMode?: boolean;
 }
 
-export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange }: OneBoxProps) {
+export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange, hideMode }: OneBoxProps) {
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
@@ -227,9 +229,9 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
 
         {/* Right side actions */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Signal mode dropdown — hidden when recording */}
+          {/* Signal mode dropdown — hidden when recording, or when the host hides it (the Door) */}
           <div className="relative" ref={dropdownRef}
-            style={{ display: recording ? "none" : undefined }}
+            style={{ display: recording || hideMode ? "none" : undefined }}
           >
             <button
               onClick={() => setModeOpen((o) => !o)}

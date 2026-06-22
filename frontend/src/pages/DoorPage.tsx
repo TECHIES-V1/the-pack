@@ -1,7 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { LuSettings, LuLayoutDashboard } from "react-icons/lu";
-import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
 import { OneBox } from "@/components/composer/OneBox";
@@ -9,7 +8,7 @@ import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { SettingsModal } from "@/components/settings/SettingsModal";
-import { api, streamSSE, ApiError, type IntakeTurn, type StrategyName, type HuntListItem } from "@/net/api";
+import { api, streamSSE, ApiError, type StrategyName, type HuntListItem } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
@@ -30,6 +29,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   unknown: "Couldn't reach Alpha — check the connection and try again.",
 };
 
+// Told to Alpha during intake so he can acknowledge the chosen approach when proposing a hunt.
+const STRATEGY_NOTE: Record<StrategyName, string> = {
+  orchestrate: "If a hunt launches, it will use dynamic orchestration — the pack adapts as it learns.",
+  deep_dive: "If a hunt launches, it will use iterative deep research — search, find gaps, search again.",
+  critique: "If a hunt launches, it will use plan-execute-critique — the Sentinel challenges weak claims.",
+};
+
 function goToPlan(huntId: string) {
   window.history.pushState({}, "", `/hunt/${huntId}/plan`);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -37,7 +43,8 @@ function goToPlan(huntId: string) {
 
 export function DoorPage() {
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
-  const [alphaFile, setAlphaFile] = useState<File | null>(null);
+  // A file attached in the chat: parsed to text and fed to Alpha as context (not a forced hunt).
+  const [attached, setAttached] = useState<{ name: string; text: string } | null>(null);
   const [prefill, setPrefill] = useState<string | undefined>();
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
@@ -71,15 +78,25 @@ export function DoorPage() {
   } = useChatStore();
   const chatting = turns.length > 0 || pending;
 
+  // A fresh conversation (New hunt / cleared) drops any attached file.
+  useEffect(() => {
+    if (turns.length === 0) setAttached(null);
+  }, [turns.length]);
+
   // Front-door clarify-gate: Alpha talks normally and only PROPOSES a hunt once there's a real job.
   // Nothing launches until the Packmaster confirms (see confirmSend).
   async function runIntake() {
-    const convo: IntakeTurn[] = withCustomInstructions(
-      useChatStore.getState().turns.map((t) => ({
-        role: t.role === "alpha" ? "assistant" : "user",
-        content: t.text,
-      })),
-    );
+    type Msg = { role: "system" | "user" | "assistant"; content: string };
+    const base: Msg[] = useChatStore.getState().turns.map((t) => ({
+      role: t.role === "alpha" ? "assistant" : "user",
+      content: t.text,
+    }));
+    // Context Alpha needs but the user shouldn't see as chat turns: the chosen approach + any file.
+    const ctx: Msg[] = [{ role: "system", content: STRATEGY_NOTE[strategy] }];
+    if (attached) {
+      ctx.push({ role: "user", content: `Attached file "${attached.name}":\n\n${attached.text}` });
+    }
+    const convo = withCustomInstructions<Msg>([...ctx, ...base]);
     setErrorMsg(null);
     setPending(true);
     try {
@@ -151,33 +168,22 @@ export function DoorPage() {
     }
   }
 
-  // A dropped file becomes a REAL hunt: parse (or transcribe) it, then send the pack on it.
-  async function handleFileAction(action: string) {
-    const file = alphaFile;
-    if (!file) return;
-    setAlphaFile(null);
+  // A file attached in the chat is parsed and held as CONTEXT — Alpha can discuss it; a hunt only
+  // launches when there's a real task (the normal clarify-gate). It is NOT a forced hunt.
+  async function parseAttachment(file: File) {
     const t = file.type;
     if (t.startsWith("image/") || t.startsWith("video/")) {
       addAlpha("I can't read images or video yet — try a PDF, doc, spreadsheet, or audio file.");
       return;
     }
-    addAlpha(`On it — ${action.toLowerCase()} from ${file.name}.`);
     try {
-      const isAudio = t.startsWith("audio/");
-      const parsed = isAudio ? await api.transcribe(file) : await api.parse(file);
+      const parsed = t.startsWith("audio/") ? await api.transcribe(file) : await api.parse(file);
       const text = (parsed.text || "").trim();
       if (!text) {
-        addAlpha("I couldn't pull any text out of that file — tell me what's in it and I'll go.");
+        addAlpha(`I couldn't pull any text out of ${file.name} — tell me what's in it.`);
         return;
       }
-      const task = `${action}. Source material from ${file.name}:\n\n${text}`.slice(0, 8000);
-      const { hunt_id } = await api.createHunt({
-        input: task,
-        source: isAudio ? "spoken" : "dropped",
-        strategy,
-      });
-      bindHunt(hunt_id);
-      goToPlan(hunt_id);
+      setAttached({ name: file.name, text: text.slice(0, 8000) });
     } catch {
       addAlpha("I couldn't read that file just now — try again, or just tell me what's in it.");
     }
@@ -190,18 +196,18 @@ export function DoorPage() {
   }
 
   function handleFilesDropped(files: File[]) {
-    setDroppedFiles(files);
-    if (files.length > 0) setAlphaFile(files[0]);
+    setDroppedFiles(files); // flows to OneBox → onFilesAdded → parseAttachment
   }
 
   const composer = (
     <OneBox
       droppedFiles={droppedFiles}
       prefill={prefill}
+      hideMode
       placeholder={chatting ? "Talk to Alpha…" : "What should the pack hunt down?"}
-      onFilesAdded={(files) => setAlphaFile(files[0])}
+      onFilesAdded={(files) => files[0] && parseAttachment(files[0])}
       onFileRemoved={(name) => {
-        if (alphaFile?.name === name) setAlphaFile(null);
+        if (attached?.name === name) setAttached(null);
       }}
       onFolderRejected={showFolderToast}
       onRecordingChange={setRecording}
@@ -267,6 +273,24 @@ export function DoorPage() {
     </p>
   );
 
+  // The active attachment — Alpha keeps reading it through the conversation until it's removed.
+  const attachmentChip = attached ? (
+    <div className="w-[min(760px,92vw)] shrink-0 flex items-center gap-2 mb-2 px-1">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#242424] border border-[#2a2a2a] px-3 py-1 text-[12px] text-[#d4d4d8]">
+        <span aria-hidden>📎</span>
+        <span className="max-w-[240px] truncate">{attached.name}</span>
+        <button
+          onClick={() => setAttached(null)}
+          className="text-[#71717a] hover:text-white bg-transparent border-none cursor-pointer leading-none text-[14px]"
+          aria-label="Remove attachment"
+        >
+          ×
+        </button>
+      </span>
+      <span className="text-[11px] text-[#71717a]">Alpha will read this in the conversation.</span>
+    </div>
+  ) : null;
+
   return (
     <DropHalo onFilesDropped={handleFilesDropped} onFolderRejected={showFolderToast}>
       <div className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col overflow-hidden">
@@ -315,6 +339,7 @@ export function DoorPage() {
             />
             {followUps}
             {errorBanner}
+            {attachmentChip}
             {launchChip}
             <div className="w-[min(760px,92vw)] shrink-0">
               {composer}
@@ -361,6 +386,7 @@ export function DoorPage() {
                 )}
               </AnimatePresence>
 
+              {attachmentChip}
               {composer}
               {disclaimer}
 
@@ -368,23 +394,6 @@ export function DoorPage() {
                 <span className="text-[12px] text-[#71717a]">How should they hunt?</span>
                 <StrategyPicker value={strategy} onChange={setStrategy} disabled={recording} />
               </div>
-
-              <AnimatePresence>
-                {alphaFile && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <AlphaReactionSheet
-                      file={alphaFile}
-                      onDismiss={() => setAlphaFile(null)}
-                      onAction={(action: string) => handleFileAction(action)}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
 
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
