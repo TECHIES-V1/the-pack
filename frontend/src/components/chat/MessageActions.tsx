@@ -2,8 +2,17 @@
 // last reply, edit & resend a prompt, and 👍/👎 feedback. Shown on hover of a message row (the
 // parent gives the row a `group` class).
 
-import { useState } from "react";
-import { LuCopy, LuCheck, LuRefreshCw, LuPencil, LuThumbsUp, LuThumbsDown } from "react-icons/lu";
+import { useEffect, useRef, useState } from "react";
+import {
+  LuCopy,
+  LuCheck,
+  LuRefreshCw,
+  LuPencil,
+  LuThumbsUp,
+  LuThumbsDown,
+  LuVolume2,
+  LuSquare,
+} from "react-icons/lu";
 
 interface Props {
   text: string;
@@ -21,6 +30,8 @@ const BTN =
 export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit }: Props) {
   const [copied, setCopied] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+  const speakingRef = useRef(false);
 
   function copy() {
     navigator.clipboard?.writeText(text).then(() => {
@@ -28,6 +39,30 @@ export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit
       setTimeout(() => setCopied(false), 1200);
     });
   }
+
+  function readAloud() {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    if (speakingRef.current) {
+      synth.cancel();
+      return; // onend flips state off
+    }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.onend = () => {
+      speakingRef.current = false;
+      setSpeaking(false);
+    };
+    u.onerror = u.onend;
+    speakingRef.current = true;
+    setSpeaking(true);
+    synth.speak(u);
+  }
+
+  // Stop this message's speech if it unmounts mid-read.
+  useEffect(() => () => {
+    if (speakingRef.current) window.speechSynthesis?.cancel();
+  }, []);
 
   return (
     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -49,6 +84,14 @@ export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit
 
       {role === "alpha" && (
         <>
+          <button
+            className={`${BTN} ${speaking ? "text-[#e6a23c]" : ""}`}
+            onClick={readAloud}
+            title={speaking ? "Stop" : "Read aloud"}
+            aria-label={speaking ? "Stop reading" : "Read aloud"}
+          >
+            {speaking ? <LuSquare size={13} /> : <LuVolume2 size={14} />}
+          </button>
           <button
             className={`${BTN} ${vote === "up" ? "text-[#3fb27f]" : ""}`}
             onClick={() => setVote((v) => (v === "up" ? null : "up"))}
