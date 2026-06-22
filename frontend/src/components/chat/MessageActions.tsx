@@ -22,12 +22,14 @@ interface Props {
   onRegenerate?: () => void;
   /** Edit & resend this user prompt. */
   onEdit?: () => void;
+  /** Fire with the new vote value (or null when toggled off) — callers persist to backend. */
+  onVote?: (vote: "up" | "down" | null) => void;
 }
 
 const BTN =
   "p-1 rounded text-[#71717a] hover:text-white hover:bg-white/5 transition-colors cursor-pointer";
 
-export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit }: Props) {
+export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit, onVote }: Props) {
   const [copied, setCopied] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -94,7 +96,11 @@ export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit
           </button>
           <button
             className={`${BTN} ${vote === "up" ? "text-[#3fb27f]" : ""}`}
-            onClick={() => setVote((v) => (v === "up" ? null : "up"))}
+            onClick={() => {
+              const next = vote === "up" ? null : "up";
+              setVote(next);
+              onVote?.(next);
+            }}
             title="Good reply"
             aria-label="Good reply"
             aria-pressed={vote === "up"}
@@ -103,7 +109,11 @@ export function MessageActions({ text, role, canRegenerate, onRegenerate, onEdit
           </button>
           <button
             className={`${BTN} ${vote === "down" ? "text-[#e6a23c]" : ""}`}
-            onClick={() => setVote((v) => (v === "down" ? null : "down"))}
+            onClick={() => {
+              const next = vote === "down" ? null : "down";
+              setVote(next);
+              onVote?.(next);
+            }}
             title="Bad reply"
             aria-label="Bad reply"
             aria-pressed={vote === "down"}

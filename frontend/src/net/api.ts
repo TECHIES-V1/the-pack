@@ -244,4 +244,6 @@ export const api = {
       `/hunts/${id}/tracks/export`,
     ),
   signedUpload: () => post<{ upload_url: string; object_key: string }>("/uploads"),
+  submitFeedback: (huntId: string, turnIndex: number, vote: "up" | "down") =>
+    post<{ ok: boolean }>(`/hunts/${huntId}/feedback`, { turn_index: turnIndex, vote }),
 };

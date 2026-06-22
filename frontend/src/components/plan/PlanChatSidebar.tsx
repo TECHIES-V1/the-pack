@@ -302,6 +302,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
                       role="alpha"
                       canRegenerate={i === lastAlpha}
                       onRegenerate={regenerate}
+                      onVote={(vote) => vote && api.submitFeedback(huntId, i, vote).catch(() => {})}
                     />
                   </div>
                 </div>
