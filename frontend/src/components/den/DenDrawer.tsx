@@ -3,7 +3,7 @@
 // (Rename / delete / archive / pin need backend endpoints — flagged, not faked.)
 
 import { useEffect, useMemo, useState } from "react";
-import { LuPanelLeft, LuX, LuSearch, LuPlus } from "react-icons/lu";
+import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2 } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct } from "@/net/api";
 
 function goTo(path: string) {
@@ -65,6 +65,26 @@ export function DenDrawer() {
     goTo(`/hunt/${id}`);
   }
 
+  function rename(h: HuntListItem) {
+    const next = window.prompt("Rename hunt", h.title);
+    if (next == null) return;
+    const title = next.trim();
+    if (!title) return;
+    setHunts((hs) => hs.map((x) => (x.hunt_id === h.hunt_id ? { ...x, title } : x)));
+    api.patchHunt(h.hunt_id, { title }).catch(() => {});
+  }
+
+  function archive(h: HuntListItem) {
+    setHunts((hs) => hs.filter((x) => x.hunt_id !== h.hunt_id));
+    api.patchHunt(h.hunt_id, { archived: true }).catch(() => {});
+  }
+
+  function remove(h: HuntListItem) {
+    if (!window.confirm(`Delete "${h.title}"? This can't be undone.`)) return;
+    setHunts((hs) => hs.filter((x) => x.hunt_id !== h.hunt_id));
+    api.deleteHunt(h.hunt_id).catch(() => {});
+  }
+
   return (
     <>
       <button
@@ -114,11 +134,13 @@ export function DenDrawer() {
                 huntGroups.map((g) => (
                   <Section key={g.label} title={g.label}>
                     {g.items.map((h) => (
-                      <Row
+                      <HuntRow
                         key={h.hunt_id}
-                        title={h.title}
-                        sub={`${h.state} · ${new Date(h.created_at).toLocaleDateString()}`}
-                        onClick={() => openHunt(h.hunt_id)}
+                        hunt={h}
+                        onOpen={() => openHunt(h.hunt_id)}
+                        onRename={() => rename(h)}
+                        onArchive={() => archive(h)}
+                        onDelete={() => remove(h)}
                       />
                     ))}
                   </Section>
@@ -160,6 +182,51 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div className="flex flex-col gap-2">
       <h3 className="text-[11px] uppercase tracking-wide text-[#71717a] m-0">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+function HuntRow({
+  hunt,
+  onOpen,
+  onRename,
+  onArchive,
+  onDelete,
+}: {
+  hunt: HuntListItem;
+  onOpen: () => void;
+  onRename: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const act = "p-1 rounded text-[#a1a1aa] hover:text-white hover:bg-white/10 cursor-pointer";
+  return (
+    <div className="group relative">
+      <button
+        onClick={onOpen}
+        className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-20 py-2.5 hover:border-[#404040] cursor-pointer w-full"
+      >
+        <div className="text-[13px] text-white truncate">{hunt.title}</div>
+        <div className="text-[11px] text-[#71717a] mt-0.5">
+          {hunt.state} · {new Date(hunt.created_at).toLocaleDateString()}
+        </div>
+      </button>
+      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+        <button className={act} title="Rename" aria-label="Rename" onClick={onRename}>
+          <LuPencil size={13} />
+        </button>
+        <button className={act} title="Archive" aria-label="Archive" onClick={onArchive}>
+          <LuArchive size={13} />
+        </button>
+        <button
+          className="p-1 rounded text-[#a1a1aa] hover:text-[#ff6b5e] hover:bg-[#e03a2f]/10 cursor-pointer"
+          title="Delete"
+          aria-label="Delete"
+          onClick={onDelete}
+        >
+          <LuTrash2 size={13} />
+        </button>
+      </div>
     </div>
   );
 }
