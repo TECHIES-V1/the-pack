@@ -74,4 +74,12 @@
     --motion-base: 0ms;
     --motion-slow: 0ms;
   }
+  /* Kill Tailwind keyframe animations — they bypass CSS variable motion tokens */
+  .animate-shimmer,
+  .animate-pulse,
+  .animate-spin,
+  .animate-bounce,
+  [class*="animate-"] {
+    animation: none !important;
+  }
 }
