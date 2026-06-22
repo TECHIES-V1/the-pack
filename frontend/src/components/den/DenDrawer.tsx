@@ -3,7 +3,7 @@
 // (Rename / delete / archive / pin need backend endpoints — flagged, not faked.)
 
 import { useEffect, useMemo, useState } from "react";
-import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2 } from "react-icons/lu";
+import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct } from "@/net/api";
 import { startNewHunt } from "@/lib/nav";
 
@@ -205,28 +205,40 @@ function HuntRow({
     <div className="group relative">
       <button
         onClick={onOpen}
-        className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-20 py-2.5 hover:border-[#404040] cursor-pointer w-full"
+        className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-24 py-2.5 hover:border-[#404040] cursor-pointer w-full"
       >
         <div className="text-[13px] text-white truncate">{hunt.title}</div>
         <div className="text-[11px] text-[#71717a] mt-0.5">
           {hunt.state} · {new Date(hunt.created_at).toLocaleDateString()}
         </div>
       </button>
-      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
-        <button className={act} title="Rename" aria-label="Rename" onClick={onRename}>
-          <LuPencil size={13} />
-        </button>
-        <button className={act} title="Archive" aria-label="Archive" onClick={onArchive}>
-          <LuArchive size={13} />
-        </button>
+      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+        {/* Always-visible canvas button — the main reason to open a past hunt */}
         <button
-          className="p-1 rounded text-[#a1a1aa] hover:text-[#ff6b5e] hover:bg-[#e03a2f]/10 cursor-pointer"
-          title="Delete"
-          aria-label="Delete"
-          onClick={onDelete}
+          className="p-1 rounded text-[#3fb27f] hover:text-white hover:bg-white/10 cursor-pointer"
+          title="Open canvas"
+          aria-label="Open canvas"
+          onClick={onOpen}
         >
-          <LuTrash2 size={13} />
+          <LuLayoutDashboard size={13} />
         </button>
+        {/* Destructive / management actions only on hover */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+          <button className={act} title="Rename" aria-label="Rename" onClick={onRename}>
+            <LuPencil size={13} />
+          </button>
+          <button className={act} title="Archive" aria-label="Archive" onClick={onArchive}>
+            <LuArchive size={13} />
+          </button>
+          <button
+            className="p-1 rounded text-[#a1a1aa] hover:text-[#ff6b5e] hover:bg-[#e03a2f]/10 cursor-pointer"
+            title="Delete"
+            aria-label="Delete"
+            onClick={onDelete}
+          >
+            <LuTrash2 size={13} />
+          </button>
+        </div>
       </div>
     </div>
   );
