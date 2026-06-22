@@ -4,13 +4,16 @@
 import { LuX } from "react-icons/lu";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useChatStore } from "@/store/chatStore";
+import { useUiStore } from "@/store/uiStore";
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({ onClose }: { onClose?: () => void }) {
+  const close = useUiStore((s) => s.setSettingsOpen);
+  function dismiss() { close(false); onClose?.(); }
   const { customInstructions, setCustomInstructions } = useSettingsStore();
 
   function clearConversation() {
     useChatStore.getState().reset();
-    onClose();
+    dismiss();
   }
 
   function clearAllData() {
@@ -22,13 +25,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     }
     useChatStore.getState().reset();
     setCustomInstructions("");
-    onClose();
+    dismiss();
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
-      onClick={onClose}
+      onClick={dismiss}
     >
       <div
         className="w-[min(520px,94vw)] max-h-[85vh] overflow-y-auto bg-[#1A1A1A] border border-[#2a2a2a] rounded-2xl text-white scrollbar-subtle"
@@ -36,7 +39,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       >
         <header className="flex items-center justify-between px-6 py-4 border-b border-[#2a2a2a] sticky top-0 bg-[#1A1A1A]">
           <h2 className="text-[16px] font-medium m-0">Settings</h2>
-          <button className="text-[#a1a1aa] hover:text-white" onClick={onClose} aria-label="Close settings">
+          <button className="text-[#a1a1aa] hover:text-white" onClick={dismiss} aria-label="Close settings">
             <LuX size={18} />
           </button>
         </header>
