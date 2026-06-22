@@ -156,6 +156,14 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         },
       };
 
+    case "plan_edited": {
+      // The user tweaked the plan before launch; reflect edited assumptions in the shown plan.
+      const diff = (ev.payload["diff"] ?? {}) as { assumptions?: string[] };
+      const plan =
+        s.plan && Array.isArray(diff.assumptions) ? { ...s.plan, assumptions: diff.assumptions } : s.plan;
+      return { ...s, plan, feed: feed(s, ev, "Updated the plan before the hunt.") };
+    }
+
     case "plan_approved":
       return {
         ...s,
@@ -275,6 +283,9 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         feed: feed(s, ev, `${f(ev, "challenger")} challenged ${f(ev, "defendant")}.`),
       };
 
+    case "standoff_turn":
+      return { ...s, feed: feed(s, ev, f(ev, "argument_summary")) };
+
     case "standoff_resolved":
       return {
         ...s,
@@ -328,6 +339,25 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
 
     case "hunt_stopped":
       return { ...s, state: "stopped_by_user" };
+
+    case "input_added":
+      return {
+        ...s,
+        feed: feed(
+          s,
+          ev,
+          f<boolean>(ev, "mid_hunt") ? "You added context to the hunt." : "Added your material to the hunt.",
+        ),
+      };
+
+    case "transcript_ready":
+      return { ...s, feed: feed(s, ev, "Transcribed your audio into the hunt.") };
+
+    case "benchmark_started":
+      return { ...s, feed: feed(s, ev, "Benchmarking the pack against a lone wolf…") };
+
+    case "benchmark_completed":
+      return { ...s, feed: feed(s, ev, "The scorecard is ready.") };
 
     default:
       return s;
