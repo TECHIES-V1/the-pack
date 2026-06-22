@@ -37,6 +37,11 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 // How tightly the Packmaster holds the leash — sent to the engine at approval (it honors all three).
 type Autonomy = "on_command" | "on_signal" | "wild";
+const MODES: { value: Autonomy; label: string; blurb: string }[] = [
+  { value: "on_command", label: "On Command", blurb: "Alpha pauses at forks and checks in before he writes the brief." },
+  { value: "on_signal", label: "On Signal", blurb: "Alpha runs, but pauses when the pack genuinely disagrees." },
+  { value: "wild", label: "On Wild", blurb: "Alpha makes the calls himself and brings back the result." },
+];
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
@@ -44,12 +49,11 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     useChatStore();
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
-  const [mode] = useState<Autonomy>("on_signal");
+  const [mode, setMode] = useState<Autonomy>("on_signal");
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<string | undefined>();
-  const [showBudget, setShowBudget] = useState(false);
   // While the pack runs, the composer can either ask Alpha (side-chat) or feed the live hunt.
   const [target, setTarget] = useState<"ask" | "feed">("ask");
   const prevStateRef = useRef(view.state);
@@ -385,56 +389,59 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           </div>
         )}
 
-        {/* Budget pill — only when plan is ready, just above the composer */}
+        {/* Plan-ready gate — an unmistakable launch card (leash + budget + Send), pinned above the
+            composer so it never hides when you type. */}
         {view.state === "plan_ready" && (
-          <div className="flex items-center gap-2 pb-2">
-            {!showBudget ? (
-              <button
-                onClick={() => setShowBudget(true)}
-                className="text-[11px] text-[#71717a] hover:text-[#a1a1aa] border border-[#2a2a2a] rounded-full px-2.5 py-0.5 cursor-pointer bg-transparent transition-colors"
-              >
-                Budget · ${boundary.toFixed(2)} ↕
-              </button>
-            ) : (
-              <span className="flex items-center gap-2 text-[11px] text-[#a1a1aa]">
-                $<input
-                  type="number"
-                  step="0.25"
-                  min="0.25"
-                  value={boundary}
-                  onChange={(e) => setBoundary(Number(e.target.value))}
-                  className="w-16 bg-[#0F0F0F] border border-[#2a2a2a] rounded px-1.5 py-0.5 text-white"
-                />
-                <button
-                  onClick={() => setShowBudget(false)}
-                  className="hover:text-white cursor-pointer bg-transparent border-none"
-                >
-                  Done
-                </button>
-              </span>
-            )}
+          <div className={`${PANEL} p-3 mb-2 flex flex-col gap-2.5`}>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-[#a1a1aa]">How much leash?</span>
+              <div className="flex rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] p-0.5">
+                {MODES.map((m) => (
+                  <button
+                    key={m.value}
+                    onClick={() => setMode(m.value)}
+                    aria-pressed={mode === m.value}
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] cursor-pointer border-none transition-colors ${
+                      mode === m.value ? "bg-[#2e2e2e] text-white" : "bg-transparent text-[#a1a1aa] hover:text-white"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[#71717a]">{MODES.find((m) => m.value === mode)?.blurb}</span>
+            </div>
+            <label className="flex items-center gap-2 text-[12px] text-[#a1a1aa]">
+              Budget $
+              <input
+                type="number"
+                step="0.25"
+                min="0.25"
+                value={boundary}
+                onChange={(e) => setBoundary(Number(e.target.value))}
+                className="w-20 bg-[#0F0F0F] border border-[#2a2a2a] rounded-md px-2 py-1 text-white"
+              />
+            </label>
+            <button
+              onClick={() => guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary }))}
+              disabled={busy}
+              className="bg-[#3fb27f] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#3fb27f]/90 disabled:opacity-70 cursor-pointer border-none"
+            >
+              {busy ? "Sending the pack…" : "Send the pack →"}
+            </button>
           </div>
         )}
 
         <OneBox
           placeholder={
             view.state === "plan_ready"
-              ? "Ask about the plan, or hit Send to launch…"
+              ? "Ask about the plan, or tweak it…"
               : target === "feed" && RUNNING.has(view.state)
               ? "Add a source or note for the pack…"
               : "Ask Alpha anything…"
           }
           prefill={prefill}
           onFilesAdded={(files) => files[0] && attachFileToHunt(files[0])}
-          packAction={
-            view.state === "plan_ready"
-              ? {
-                  label: "Send the pack →",
-                  onSend: () => guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary })),
-                  active: true,
-                }
-              : undefined
-          }
           onSubmit={(payload) =>
             target === "feed" && RUNNING.has(view.state)
               ? addToHunt(payload.text)
