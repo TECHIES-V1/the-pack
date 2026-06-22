@@ -17,9 +17,10 @@ import json
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, Request, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from openai import APIStatusError, RateLimitError
 from pydantic import BaseModel, Field
 
 from app.tools.file_parse import detect_kind, parse_bytes, parse_url
@@ -474,15 +475,22 @@ async def intake(body: IntakeBody, request: Request) -> JSONResponse:
             }
         )
 
-    result = await client.complete(
-        CallSpec(
-            hunt_id="intake",
-            wolf_id="alpha",
-            tier="plus",
-            intent="intake",
-            messages=[{"role": "system", "content": _ALPHA_INTAKE}, *msgs],
+    try:
+        result = await client.complete(
+            CallSpec(
+                hunt_id="intake",
+                wolf_id="alpha",
+                tier="plus",
+                intent="intake",
+                messages=[{"role": "system", "content": _ALPHA_INTAKE}, *msgs],
+            )
         )
-    )
+    except RateLimitError:
+        raise HTTPException(429, detail="rate_limit")
+    except APIStatusError as e:
+        if "content_filter" in str(e):
+            raise HTTPException(400, detail="content_filter")
+        raise HTTPException(500, detail=str(e))
     text = (result.text or "").strip()
     parsed = _parse_intake(text)
     if parsed is not None:
@@ -515,15 +523,22 @@ async def ask_alpha(hunt_id: str, body: AskAlpha, request: Request) -> JSONRespo
         history = [{"role": "user", "content": body.question}]
 
     system = f"{_ALPHA_CHAT}\n\nThe hunt you're discussing is about: {task or 'the current task'}."
-    result = await client.complete(
-        CallSpec(
-            hunt_id=hunt_id,
-            wolf_id="alpha",
-            tier="plus",
-            intent="chat",
-            messages=[{"role": "system", "content": system}, *history],
+    try:
+        result = await client.complete(
+            CallSpec(
+                hunt_id=hunt_id,
+                wolf_id="alpha",
+                tier="plus",
+                intent="chat",
+                messages=[{"role": "system", "content": system}, *history],
+            )
         )
-    )
+    except RateLimitError:
+        raise HTTPException(429, detail="rate_limit")
+    except APIStatusError as e:
+        if "content_filter" in str(e):
+            raise HTTPException(400, detail="content_filter")
+        raise HTTPException(500, detail=str(e))
     return JSONResponse(content={"reply": result.text})
 
 
@@ -577,7 +592,15 @@ async def intake_stream(body: IntakeBody, request: Request) -> StreamingResponse
                 break
             yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
 
-        result = await task
+        try:
+            result = await task
+        except RateLimitError:
+            yield f"data: {json.dumps({'type': 'error', 'kind': 'rate_limit'})}\n\n"
+            return
+        except APIStatusError as e:
+            kind = "content_filter" if "content_filter" in str(e) else "unknown"
+            yield f"data: {json.dumps({'type': 'error', 'kind': kind})}\n\n"
+            return
         text = (result.text or "").strip()
         parsed = _parse_intake(text)
         if parsed is not None:
@@ -632,7 +655,15 @@ async def ask_stream(hunt_id: str, body: AskAlpha, request: Request) -> Streamin
                 break
             yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
 
-        result = await task
+        try:
+            result = await task
+        except RateLimitError:
+            yield f"data: {json.dumps({'type': 'error', 'kind': 'rate_limit'})}\n\n"
+            return
+        except APIStatusError as e:
+            kind = "content_filter" if "content_filter" in str(e) else "unknown"
+            yield f"data: {json.dumps({'type': 'error', 'kind': kind})}\n\n"
+            return
         yield f"data: {json.dumps({'type': 'done', 'reply': result.text})}\n\n"
 
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
