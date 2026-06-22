@@ -24,6 +24,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body?: unknown) =>
   req<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 
+const patch = <T>(path: string, body?: unknown) =>
+  req<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+
+const del = <T>(path: string) => req<T>(path, { method: "DELETE" });
+
 // Multipart (file upload) — let the browser set the boundary; never set Content-Type here.
 async function postForm<T>(path: string, form: FormData): Promise<T> {
   const res = await fetch(`${ENGINE_URL}${path}`, { method: "POST", body: form });
@@ -134,6 +139,13 @@ export const api = {
     req<{ strategies: StrategyInfo[]; default: StrategyName }>("/strategies"),
   listHunts: () => req<{ hunts: HuntListItem[] }>("/hunts"),
   getHunt: (id: string) => req<HuntSnapshot>(`/hunts/${id}`),
+  patchHunt: (id: string, body: { title?: string; archived?: boolean }) =>
+    patch<{ hunt_id: string; ok: boolean }>(`/hunts/${id}`, body),
+  deleteHunt: (id: string) => del<{ hunt_id: string; deleted: boolean }>(`/hunts/${id}`),
+  getMessages: (id: string) =>
+    req<{ messages: { role: "user" | "alpha"; text: string }[] }>(`/hunts/${id}/messages`),
+  saveMessage: (id: string, role: "user" | "alpha", content: string) =>
+    post<{ ok: boolean }>(`/hunts/${id}/messages`, { role, content }),
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
   approvePlan: (id: string, body: ApprovePlanBody) =>
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),

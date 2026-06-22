@@ -111,6 +111,11 @@ export function DoorPage() {
     try {
       const { hunt_id } = await api.createHunt({ input: brief, source: "typed", strategy });
       bindHunt(hunt_id);
+      // Seed the Door conversation into the hunt so it persists (sequential to keep seq order).
+      const seed = useChatStore.getState().turns;
+      void (async () => {
+        for (const t of seed) await api.saveMessage(hunt_id, t.role, t.text).catch(() => {});
+      })();
       goToPlan(hunt_id);
     } catch {
       addAlpha("I couldn't reach the engine just now — make sure it's running and try again.");

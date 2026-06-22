@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { stripDashes } from "@/lib/text";
+import { api } from "@/net/api";
 
 export interface ChatTurn {
   role: "user" | "alpha";
@@ -30,18 +31,29 @@ interface ChatStore {
   dropLastAlpha: () => void;
   /** Keep turns[0..index-1]; removes that turn and everything after it (Edit & resend). */
   truncateFrom: (index: number) => void;
+  /** Replace the whole thread (used to hydrate from the backend's saved messages). */
+  hydrate: (turns: ChatTurn[]) => void;
 }
 
 export const useChatStore = create<ChatStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       turns: [],
       pending: false,
       proposal: null,
       huntId: null,
-      addUser: (text) => set((s) => ({ turns: [...s.turns, { role: "user", text }] })),
+      addUser: (text) => {
+        set((s) => ({ turns: [...s.turns, { role: "user", text }] }));
+        const hid = get().huntId;
+        if (hid) api.saveMessage(hid, "user", text).catch(() => {});
+      },
       // Everything Alpha says is cleansed of em/en dashes before it ever reaches the screen.
-      addAlpha: (text) => set((s) => ({ turns: [...s.turns, { role: "alpha", text: stripDashes(text) }] })),
+      addAlpha: (text) => {
+        const clean = stripDashes(text);
+        set((s) => ({ turns: [...s.turns, { role: "alpha", text: clean }] }));
+        const hid = get().huntId;
+        if (hid) api.saveMessage(hid, "alpha", clean).catch(() => {});
+      },
       setPending: (pending) => set({ pending }),
       propose: (brief) => set({ proposal: { brief: stripDashes(brief) } }),
       clearProposal: () => set({ proposal: null }),
@@ -54,6 +66,7 @@ export const useChatStore = create<ChatStore>()(
           return { turns: t, proposal: null };
         }),
       truncateFrom: (index) => set((s) => ({ turns: s.turns.slice(0, index), proposal: null })),
+      hydrate: (turns) => set({ turns }),
     }),
     {
       name: "pack-chat",
