@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useRef, useState } from "react";
-import { LuSettings } from "react-icons/lu";
+import { useEffect, useRef, useState } from "react";
+import { LuSettings, LuLayoutDashboard } from "react-icons/lu";
 import { AlphaReactionSheet } from "@/components/composer/AlphaReactionSheet";
 import { DropHalo } from "@/components/composer/DropHalo";
 import { InstinctChip } from "@/components/composer/InstinctChip";
@@ -9,7 +9,7 @@ import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { SettingsModal } from "@/components/settings/SettingsModal";
-import { api, streamSSE, ApiError, type IntakeTurn, type StrategyName } from "@/net/api";
+import { api, streamSSE, ApiError, type IntakeTurn, type StrategyName, type HuntListItem } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
@@ -44,7 +44,17 @@ export function DoorPage() {
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeHunt, setActiveHunt] = useState<HuntListItem | null>(null);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const ACTIVE_STATES = new Set(["plan_ready", "hunting", "holding", "standoff", "finishing"]);
+
+  useEffect(() => {
+    api.listHunts().then(({ hunts }) => {
+      const found = hunts.find((h) => ACTIVE_STATES.has(h.state)) ?? null;
+      setActiveHunt(found);
+    }).catch(() => {});
+  }, []);
 
   const {
     turns,
@@ -270,7 +280,7 @@ export function DoorPage() {
           <LuSettings size={19} />
         </button>
         {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-        <header className="shrink-0 px-7 py-5 bg-door-bg">
+        <header className="shrink-0 px-7 py-5 bg-door-bg flex items-center justify-between">
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -279,6 +289,20 @@ export function DoorPage() {
           >
             Pack
           </motion.span>
+
+          {activeHunt && (
+            <motion.button
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              onClick={() => goToPlan(activeHunt.hunt_id)}
+              className="flex items-center gap-2 rounded-lg border border-[#3fb27f]/40 bg-[#3fb27f]/10 text-[#3fb27f] px-3 py-1.5 text-[12px] hover:bg-[#3fb27f]/20 transition-colors cursor-pointer mr-20"
+            >
+              <LuLayoutDashboard size={13} />
+              <span className="max-w-[180px] truncate">{activeHunt.title}</span>
+              <span className="text-[#3fb27f]/60">→</span>
+            </motion.button>
+          )}
         </header>
 
         {chatting ? (
