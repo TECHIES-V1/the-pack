@@ -117,8 +117,12 @@ export function WolfCard({ data, selected = false }: { data: WolfNodeData; selec
       "background var(--motion-base) var(--easing), border-color var(--motion-base) var(--easing), box-shadow var(--motion-base) var(--easing)",
   };
 
+  const statusLabel = `${data.role} wolf — ${data.status}${data.liveText ? ": " + data.liveText : ""}`;
+
   return (
     <div
+      role="status"
+      aria-label={statusLabel}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -128,7 +132,7 @@ export function WolfCard({ data, selected = false }: { data: WolfNodeData; selec
         fontFamily: "var(--font-sans)",
       }}
     >
-      <div className={s.shimmer ? "animate-shimmer" : ""} style={circle}>
+      <div aria-hidden="true" className={s.shimmer ? "animate-shimmer" : ""} style={circle}>
         {ROLE_ICON[data.role]}
       </div>
 

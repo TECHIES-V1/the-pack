@@ -17,7 +17,22 @@ import { ROLE_COLOR, nodeTypes, type WolfNodeData } from "./WolfNode";
 import { layoutPack } from "./packLayout";
 import { TraceRail } from "./TraceRail";
 import type { HuntView, WolfView } from "@/events/reducer";
+import type { HuntState } from "@/events/types";
 import type { WolfRole, WolfStatus } from "@/events/types";
+
+const HUNT_STATE_LABEL: Record<HuntState, string> = {
+  draft: "Starting up",
+  planning: "Planning the hunt",
+  plan_ready: "Plan ready — awaiting your approval",
+  hunting: "Hunt in progress",
+  finishing: "Pack finishing up",
+  holding: "Pack paused — your input needed",
+  standoff: "Pack debating a claim",
+  halted_boundary: "Hunt paused — budget limit reached",
+  returned: "Hunt complete",
+  failed: "Hunt failed",
+  stopped_by_user: "Hunt stopped",
+};
 
 type EdgeState = "dormant" | "flowing" | "blocked";
 
@@ -137,6 +152,14 @@ export function Territory({ view }: { view: HuntView }) {
   return (
     <ReactFlowProvider>
       <div style={{ position: "relative", width: "100%", height: "100%", background: "var(--territory-bg)" }}>
+        {/* Screen-reader-only live region announcing overall hunt state */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {HUNT_STATE_LABEL[view.state] ?? view.state}
+        </div>
         <ReactFlow
           nodes={nodes}
           edges={edges}
