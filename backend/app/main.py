@@ -370,6 +370,47 @@ async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
     )
 
 
+class HuntPatch(BaseModel):
+    title: str | None = None
+    archived: bool | None = None
+
+
+class MessageIn(BaseModel):
+    role: str
+    content: str
+
+
+@app.patch("/hunts/{hunt_id}", tags=["hunts"])
+async def patch_hunt(hunt_id: str, body: HuntPatch, request: Request) -> JSONResponse:
+    """Rename or archive a hunt (Den history management)."""
+    repo = _repo(request)
+    if body.title is not None:
+        await repo.rename_hunt(hunt_id, body.title.strip()[:120])
+    if body.archived is not None:
+        await repo.set_archived(hunt_id, body.archived)
+    return JSONResponse({"hunt_id": hunt_id, "ok": True})
+
+
+@app.delete("/hunts/{hunt_id}", tags=["hunts"])
+async def delete_hunt_route(hunt_id: str, request: Request) -> JSONResponse:
+    """Delete a hunt and everything hanging off it."""
+    await _repo(request).delete_hunt(hunt_id)
+    return JSONResponse({"hunt_id": hunt_id, "deleted": True})
+
+
+@app.get("/hunts/{hunt_id}/messages", tags=["hunts"])
+async def get_messages(hunt_id: str, request: Request) -> dict:
+    """The saved Alpha conversation for a hunt (durable, cross-device)."""
+    return {"messages": await _repo(request).list_messages(hunt_id)}
+
+
+@app.post("/hunts/{hunt_id}/messages", status_code=202, tags=["hunts"])
+async def post_message(hunt_id: str, body: MessageIn, request: Request) -> JSONResponse:
+    """Append one conversation turn to a hunt's durable chat."""
+    await _repo(request).save_message(hunt_id, body.role, body.content)
+    return JSONResponse(status_code=202, content={"ok": True})
+
+
 @app.post(
     "/hunts/{hunt_id}/plan/approve", status_code=202, response_model=CommandAccepted, tags=["hunts"]
 )

@@ -75,11 +75,11 @@ class Repo:
         }
 
     async def list_hunts(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Most-recent hunts first — powers the Den (Past Hunts)."""
+        """Most-recent, non-archived hunts first — powers the Den (Past Hunts)."""
         rows = await self._pool.fetch(
             """
-            SELECT hunt_id, state, source, raw_input, boundary_usd, created_at
-            FROM hunts ORDER BY created_at DESC LIMIT $1
+            SELECT hunt_id, state, source, raw_input, title, boundary_usd, created_at
+            FROM hunts WHERE archived = FALSE ORDER BY created_at DESC LIMIT $1
             """,
             limit,
         )
@@ -88,12 +88,50 @@ class Repo:
                 "hunt_id": r["hunt_id"],
                 "state": r["state"],
                 "source": r["source"],
-                "title": (r["raw_input"] or "").strip()[:80] or "Untitled hunt",
+                "title": (r["title"] or (r["raw_input"] or "").strip()[:80]) or "Untitled hunt",
                 "boundary_usd": r["boundary_usd"],
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows
         ]
+
+    async def rename_hunt(self, hunt_id: str, title: str) -> None:
+        await self._pool.execute(
+            "UPDATE hunts SET title = $2, updated_at = now() WHERE hunt_id = $1", hunt_id, title
+        )
+
+    async def set_archived(self, hunt_id: str, archived: bool) -> None:
+        await self._pool.execute(
+            "UPDATE hunts SET archived = $2, updated_at = now() WHERE hunt_id = $1",
+            hunt_id,
+            archived,
+        )
+
+    async def delete_hunt(self, hunt_id: str) -> None:
+        """Remove a hunt and everything hanging off it."""
+        for tbl in ("messages", "events", "artifacts", "checkpoints"):
+            await self._pool.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
+        await self._pool.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
+
+    # --- conversation messages (durable per-hunt chat) ---------------------------------
+
+    async def save_message(self, hunt_id: str, role: str, content: str) -> None:
+        seq = await self._pool.fetchval(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE hunt_id = $1", hunt_id
+        )
+        await self._pool.execute(
+            "INSERT INTO messages (hunt_id, seq, role, content) VALUES ($1, $2, $3, $4)",
+            hunt_id,
+            int(seq),
+            role,
+            content,
+        )
+
+    async def list_messages(self, hunt_id: str) -> list[dict[str, str]]:
+        rows = await self._pool.fetch(
+            "SELECT role, content FROM messages WHERE hunt_id = $1 ORDER BY seq", hunt_id
+        )
+        return [{"role": r["role"], "text": r["content"]} for r in rows]
 
     # --- events (the log + the outbox) -------------------------------------------------
 
