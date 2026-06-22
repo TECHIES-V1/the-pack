@@ -73,8 +73,12 @@ export function DoorPage() {
     setErrorMsg(null);
     setPending(true);
     try {
-      // Intake response is JSON so we only care about the `done` event.
+      // Intake response is JSON so we only care about the `done` event (skip raw JSON token events).
       for await (const event of streamSSE("/hunts/intake/stream", { messages: convo })) {
+        if (event.type === "error") {
+          setErrorMsg(ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown);
+          break;
+        }
         if (event.type === "done") {
           const reply = (event.reply as string) ?? "";
           const ready = Boolean(event.ready);

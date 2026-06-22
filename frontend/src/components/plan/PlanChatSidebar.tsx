@@ -111,10 +111,20 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     setPending(true);
     startAlpha(); // open empty bubble immediately
     try {
+      let streamError: string | null = null;
       for await (const event of streamSSE(`/hunts/${huntId}/ask/stream`, { messages: history })) {
+        if (event.type === "error") {
+          streamError = ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown;
+          break;
+        }
         if (event.type === "token") addAlphaToken(event.text as string);
       }
-      commitAlpha(); // strip dashes + persist to backend
+      if (streamError) {
+        dropLastAlpha();
+        setAskError(streamError);
+      } else {
+        commitAlpha(); // strip dashes + persist to backend
+      }
     } catch (err) {
       dropLastAlpha(); // remove the partial bubble
       setAskError(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
