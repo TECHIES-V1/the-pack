@@ -13,7 +13,7 @@ import Lenis from "lenis";
 import "lenis/dist/lenis.css";
 import { LuArrowDown } from "react-icons/lu";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
-import { RevealedMarkdown } from "@/components/chat/RevealedMarkdown";
+import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { MessageActions } from "@/components/chat/MessageActions";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useChatStore } from "@/store/chatStore";
@@ -133,7 +133,7 @@ export function ChatThread({
                     <AlphaAvatar size={avatarSize} />
                     <div className="flex flex-col gap-1 min-w-0">
                       <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
-                        <RevealedMarkdown text={t.text} />
+                        <MarkdownReply text={t.text} />
                       </div>
                       <MessageActions
                         text={t.text}

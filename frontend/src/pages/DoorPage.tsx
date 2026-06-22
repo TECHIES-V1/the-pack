@@ -9,7 +9,7 @@ import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { SettingsModal } from "@/components/settings/SettingsModal";
-import { api, type IntakeTurn, type StrategyName } from "@/net/api";
+import { api, streamSSE, type IntakeTurn, type StrategyName } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
@@ -64,15 +64,21 @@ export function DoorPage() {
     setError(false);
     setPending(true);
     try {
-      const { reply, ready, brief } = await api.intake(convo);
-      if (ready) {
-        propose(brief);
-        addAlpha(reply?.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
-      } else {
-        addAlpha(reply);
+      // Intake response is JSON so we only care about the `done` event.
+      for await (const event of streamSSE("/hunts/intake/stream", { messages: convo })) {
+        if (event.type === "done") {
+          const reply = (event.reply as string) ?? "";
+          const ready = Boolean(event.ready);
+          const brief = (event.brief as string) ?? "";
+          if (ready) {
+            propose(brief);
+            addAlpha(reply.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
+          } else {
+            addAlpha(reply);
+          }
+        }
       }
     } catch {
-      // Leave the thread at the user's turn and surface a real Retry, not a fake "reply".
       setError(true);
     } finally {
       setPending(false);

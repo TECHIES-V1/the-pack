@@ -12,7 +12,7 @@ import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { MessageActions } from "@/components/chat/MessageActions";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { OneBox } from "@/components/composer/OneBox";
-import { api, type IntakeTurn } from "@/net/api";
+import { api, streamSSE, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
@@ -28,7 +28,7 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
-  const { turns, pending, addUser, addAlpha, setPending, dropLastAlpha, truncateFrom } =
+  const { turns, pending, addUser, startAlpha, addAlphaToken, commitAlpha, setPending, dropLastAlpha, truncateFrom } =
     useChatStore();
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
@@ -90,6 +90,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   }
 
   // Carry the whole thread so Alpha remembers what we've been talking about.
+  // Streams tokens live into an open Alpha bubble — first token appears in <500ms.
   async function runAsk() {
     const history: IntakeTurn[] = withCustomInstructions(
       useChatStore.getState().turns.map((t) => ({
@@ -99,10 +100,14 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     );
     setAskError(false);
     setPending(true);
+    startAlpha(); // open empty bubble immediately
     try {
-      const { reply } = await api.ask(huntId, history);
-      addAlpha(reply);
+      for await (const event of streamSSE(`/hunts/${huntId}/ask/stream`, { messages: history })) {
+        if (event.type === "token") addAlphaToken(event.text as string);
+      }
+      commitAlpha(); // strip dashes + persist to backend
     } catch {
+      dropLastAlpha(); // remove the partial bubble
       setAskError(true);
     } finally {
       setPending(false);
