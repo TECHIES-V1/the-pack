@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { PlanSidebar } from "@/components/plan/PlanSidebar";
 import { PlanChatSidebar } from "@/components/plan/PlanChatSidebar";
 import { HuntStatusBanner } from "@/components/hunt/HuntStatusBanner";
+import { DenDrawer } from "@/components/den/DenDrawer";
 import { Territory } from "@/canvas/Territory";
 import { DocumentView } from "@/components/output/DocumentView";
 import { useHuntStore } from "@/store/huntStore";
@@ -45,12 +46,13 @@ export function HuntScreen() {
       transition={{ duration: 0.25 }}
       className="fixed inset-0 bg-door-bg text-white font-sans flex flex-col"
     >
+      <DenDrawer />
       <HuntStatusBanner state={view.state} />
 
       <div className="flex-1 min-h-0 flex">
         {/* Left: the pack roster — only while planning/running, not on the Return */}
         {!returned && (
-          <PlanSidebar plan={(view.plan ?? {}) as PlanView} onApprove={() => {}} onBack={() => goTo("/")} />
+          <PlanSidebar plan={(view.plan ?? {}) as PlanView} onApprove={() => {}} onBack={() => goTo("/?den=open")} />
         )}
 
         {/* Center: canvas while live, the brief on the Return — cross-faded, not snapped */}

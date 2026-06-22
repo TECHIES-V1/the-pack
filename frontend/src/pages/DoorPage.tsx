@@ -7,10 +7,16 @@ import { OneBox } from "@/components/composer/OneBox";
 import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
-import { SettingsModal } from "@/components/settings/SettingsModal";
 import { api, streamSSE, ApiError, type StrategyName, type HuntListItem } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
+import { useUiStore } from "@/store/uiStore";
 import { withCustomInstructions } from "@/store/settingsStore";
+
+const SUGGESTED_PROMPTS = [
+  "Research the top AI coding tools in 2025 and write a brief",
+  "Fact-check and summarize the latest news on quantum computing",
+  "Compare the best project management tools for a small team",
+];
 
 const INSTINCT_CHIPS = [
   { title: "The Newsroom", subtitle: "Verify claims and write articles" },
@@ -50,9 +56,9 @@ export function DoorPage() {
   const [folderToast, setFolderToast] = useState(false);
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeHunt, setActiveHunt] = useState<HuntListItem | null>(null);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { setSettingsOpen, setDenOpen } = useUiStore();
 
   const ACTIVE_STATES = new Set(["plan_ready", "hunting", "holding", "standoff", "finishing"]);
 
@@ -61,6 +67,10 @@ export function DoorPage() {
       const found = hunts.find((h) => ACTIVE_STATES.has(h.state)) ?? null;
       setActiveHunt(found);
     }).catch(() => {});
+    // Auto-open Den when arriving from "← Home" on the canvas
+    if (new URLSearchParams(window.location.search).get("den") === "open") {
+      setDenOpen(true);
+    }
   }, []);
 
   const {
@@ -69,6 +79,10 @@ export function DoorPage() {
     proposal,
     addUser,
     addAlpha,
+    startAlpha,
+    addAlphaToken,
+    commitAlpha,
+    setAbortFn,
     setPending,
     propose,
     clearProposal,
@@ -99,13 +113,16 @@ export function DoorPage() {
     const convo = withCustomInstructions<Msg>([...ctx, ...base]);
     setErrorMsg(null);
     setPending(true);
+    startAlpha();
+    const ctrl = new AbortController();
+    setAbortFn(() => ctrl.abort());
     try {
-      // Intake response is JSON so we only care about the `done` event (skip raw JSON token events).
-      for await (const event of streamSSE("/hunts/intake/stream", { messages: convo })) {
-        if (event.type === "error") {
-          setErrorMsg(ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown);
-          break;
-        }
+      let streamError: string | null = null;
+      // Intake response is JSON; only the `done` event carries meaningful content.
+      // We do open the Alpha bubble early so the user sees the thinking indicator.
+      for await (const event of streamSSE("/hunts/intake/stream", { messages: convo }, ctrl.signal)) {
+        if (event.type === "error") { streamError = ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown; break; }
+        if (event.type === "token") addAlphaToken(event.text as string);
         if (event.type === "done") {
           const reply = (event.reply as string) ?? "";
           const ready = Boolean(event.ready);
@@ -113,14 +130,18 @@ export function DoorPage() {
           if (ready) {
             propose(brief);
             addAlpha(reply.trim() ? reply : `Got it — here's the hunt: "${brief}"`);
+            dropLastAlpha(); // remove the streaming bubble; addAlpha adds a clean one
           } else {
-            addAlpha(reply);
+            commitAlpha();
           }
         }
       }
+      if (streamError) { dropLastAlpha(); setErrorMsg(streamError); }
     } catch (err) {
+      dropLastAlpha();
       setErrorMsg(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
+      setAbortFn(null);
       setPending(false);
     }
   }
@@ -298,12 +319,11 @@ export function DoorPage() {
         <button
           onClick={() => setSettingsOpen(true)}
           className="absolute top-5 right-14 z-20 p-2 text-[#A3A3A3] hover:text-white bg-transparent border-none cursor-pointer"
-          title="Settings"
+          title="Settings (⌘,)"
           aria-label="Settings"
         >
           <LuSettings size={19} />
         </button>
-        {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
         <header className="shrink-0 px-7 py-5 bg-door-bg flex items-center justify-between">
           <motion.span
             initial={{ opacity: 0 }}
@@ -409,6 +429,23 @@ export function DoorPage() {
                     onClick={() => setPrefill(chip.title)}
                     disabled={recording}
                   />
+                ))}
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4, delay: 0.3 }}
+                className="flex flex-col gap-1.5 pt-1"
+              >
+                {SUGGESTED_PROMPTS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => handleSend(p)}
+                    className="text-left text-[12px] text-[#52525b] hover:text-[#a1a1aa] transition-colors cursor-pointer bg-transparent border-none p-0 px-1"
+                  >
+                    {p} →
+                  </button>
                 ))}
               </motion.div>
             </motion.div>

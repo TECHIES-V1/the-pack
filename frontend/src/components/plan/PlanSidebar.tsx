@@ -50,7 +50,7 @@ export function PlanSidebar({ onBack, plan }: Props) {
             onClick={onBack}
             className="flex items-center gap-1.5 text-[12px] text-[#a1a1aa] hover:text-white bg-transparent border-none cursor-pointer p-0"
           >
-            <LuArrowLeft size={14} /> The Den
+            <LuArrowLeft size={14} /> Home
           </button>
           <h2 className="text-[16px] font-medium tracking-wide m-0 leading-none">The Plan</h2>
           {plan?.pattern && (

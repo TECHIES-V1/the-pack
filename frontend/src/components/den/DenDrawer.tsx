@@ -6,11 +6,26 @@ import { useEffect, useMemo, useState } from "react";
 import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct } from "@/net/api";
 import { startNewHunt } from "@/lib/nav";
+import { useUiStore } from "@/store/uiStore";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
+
+const STATE_LABEL: Record<string, { text: string; dot: string }> = {
+  draft:           { text: "Draft",     dot: "bg-[#52525b]" },
+  planning:        { text: "Planning…", dot: "bg-[#5b9bd5]" },
+  plan_ready:      { text: "Plan ready",dot: "bg-[#e6a23c]" },
+  hunting:         { text: "Hunting…",  dot: "bg-[#3fb27f]" },
+  holding:         { text: "On hold",   dot: "bg-[#e6a23c]" },
+  standoff:        { text: "Standoff",  dot: "bg-[#c084fc]" },
+  finishing:       { text: "Finishing…",dot: "bg-[#3fb27f]" },
+  returned:        { text: "Done",      dot: "bg-[#3fb27f]" },
+  halted_boundary: { text: "Paused",    dot: "bg-[#e6a23c]" },
+  failed:          { text: "Failed",    dot: "bg-[#e03a2f]" },
+  stopped_by_user: { text: "Stopped",   dot: "bg-[#52525b]" },
+};
 
 const DAY = 86_400_000;
 const BUCKETS: { label: string; max: number }[] = [
@@ -35,7 +50,8 @@ function groupByRecency(hunts: HuntListItem[]): { label: string; items: HuntList
 }
 
 export function DenDrawer() {
-  const [open, setOpen] = useState(false);
+  const open = useUiStore((s) => s.denOpen);
+  const setOpen = useUiStore((s) => s.setDenOpen);
   const [hunts, setHunts] = useState<HuntListItem[]>([]);
   const [instincts, setInstincts] = useState<Instinct[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -208,8 +224,11 @@ function HuntRow({
         className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-24 py-2.5 hover:border-[#404040] cursor-pointer w-full"
       >
         <div className="text-[13px] text-white truncate">{hunt.title}</div>
-        <div className="text-[11px] text-[#71717a] mt-0.5">
-          {hunt.state} · {new Date(hunt.created_at).toLocaleDateString()}
+        <div className="text-[11px] text-[#71717a] mt-0.5 flex items-center gap-1.5">
+          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${(STATE_LABEL[hunt.state] ?? STATE_LABEL.draft).dot}`} />
+          {(STATE_LABEL[hunt.state] ?? { text: hunt.state }).text}
+          <span className="text-[#3a3a3a]">·</span>
+          {new Date(hunt.created_at).toLocaleDateString()}
         </div>
       </button>
       <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
