@@ -37,23 +37,22 @@ const STRATEGY_LABEL: Record<string, string> = {
 
 // How tightly the Packmaster holds the leash — sent to the engine at approval (it honors all three).
 type Autonomy = "on_command" | "on_signal" | "wild";
-const MODES: { value: Autonomy; label: string; blurb: string }[] = [
-  { value: "on_command", label: "On Command", blurb: "Alpha pauses at forks and checks in before he writes the brief." },
-  { value: "on_signal", label: "On Signal", blurb: "Alpha runs, but pauses when the pack genuinely disagrees." },
-  { value: "wild", label: "On Wild", blurb: "Alpha makes the calls himself and brings back the result." },
-];
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
-  const { turns, pending, addUser, startAlpha, addAlphaToken, commitAlpha, setPending, dropLastAlpha, truncateFrom } =
+  const { turns, pending, addUser, startAlpha, addAlphaToken, commitAlpha, setPending, dropLastAlpha, truncateFrom, setAbortFn } =
     useChatStore();
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
-  const [mode, setMode] = useState<Autonomy>("on_signal");
+  const [mode] = useState<Autonomy>("on_signal");
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<string | undefined>();
+  const [showBudget, setShowBudget] = useState(false);
+  // While the pack runs, the composer can either ask Alpha (side-chat) or feed the live hunt.
+  const [target, setTarget] = useState<"ask" | "feed">("ask");
+  const prevStateRef = useRef(view.state);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
@@ -95,8 +94,20 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
 
   const hold = view.openHold;
   const resolution = pick ?? hold?.recommended ?? hold?.options[0] ?? "";
-  const showPlan = view.state === "plan_ready" && view.plan;
   const halted = view.state === "halted_boundary";
+
+  // When plan_ready first arrives, inject a conversational plan summary from Alpha.
+  const { addAlpha: _addAlpha } = useChatStore.getState();
+  useEffect(() => {
+    if (prevStateRef.current !== "plan_ready" && view.state === "plan_ready" && view.plan) {
+      const { est_cost, est_time, pattern, steps, strategy } = view.plan;
+      const label = STRATEGY_LABEL[strategy ?? ""] ?? pattern;
+      const n = steps?.length ?? 0;
+      const msg = `Beta's ready — ${n} step${n !== 1 ? "s" : ""}, ${label} pattern. Estimated cost $${est_cost.toFixed(2)}, ~${Math.round(est_time / 60)} min. I've set a $${boundary.toFixed(2)} spending limit. Ready to go?`;
+      useChatStore.getState().addAlpha(msg);
+    }
+    prevStateRef.current = view.state;
+  }, [view.state]);
 
   async function guard(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -119,9 +130,11 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     setAskError(null);
     setPending(true);
     startAlpha(); // open empty bubble immediately
+    const ctrl = new AbortController();
+    setAbortFn(() => ctrl.abort());
     try {
       let streamError: string | null = null;
-      for await (const event of streamSSE(`/hunts/${huntId}/ask/stream`, { messages: history })) {
+      for await (const event of streamSSE(`/hunts/${huntId}/ask/stream`, { messages: history }, ctrl.signal)) {
         if (event.type === "error") {
           streamError = ERROR_MESSAGES[(event.kind as string) ?? "unknown"] ?? ERROR_MESSAGES.unknown;
           break;
@@ -138,6 +151,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       dropLastAlpha(); // remove the partial bubble
       setAskError(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
+      setAbortFn(null);
       setPending(false);
     }
   }
@@ -145,6 +159,14 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   async function askAlpha(question: string) {
     addUser(question);
     await runAsk();
+  }
+
+  // Feed the running hunt: the engine absorbs it before the next step (emits input_added).
+  function addToHunt(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    addUser(`📌 Added to the hunt: ${t}`);
+    api.addInput(huntId, t).catch(() => {});
   }
 
   async function regenerate() {
@@ -179,65 +201,6 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           )}
         </div>
       </div>
-
-      {/* ---- Pinned gates: never scroll away ---------------------------------------------- */}
-      {showPlan && view.plan && (
-        <div className="shrink-0 px-4 pt-3">
-          <div className={`${PANEL} p-4 flex flex-col gap-3`}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-[13px] font-medium m-0">Hunt Summary</h3>
-              {view.plan.strategy && (
-                <span className="text-[10.5px] text-[#a1a1aa] bg-[#0F0F0F] border border-[#2a2a2a] rounded-full px-2 py-0.5">
-                  {STRATEGY_LABEL[view.plan.strategy] ?? view.plan.strategy}
-                </span>
-              )}
-            </div>
-            <ul className="text-[12px] text-[#a1a1aa] flex flex-col gap-1 m-0 p-0 list-none">
-              <li>Estimated time · {Math.round(view.plan.est_time / 60)} min</li>
-              <li>Estimated cost · ${view.plan.est_cost.toFixed(2)}</li>
-              <li>Pattern · {view.plan.pattern}</li>
-            </ul>
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[12px] text-[#a1a1aa]">How much leash?</span>
-              <div className="flex rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] p-0.5">
-                {MODES.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => setMode(m.value)}
-                    aria-pressed={mode === m.value}
-                    className={`flex-1 rounded-md px-2 py-1.5 text-[11.5px] cursor-pointer border-none transition-colors ${
-                      mode === m.value ? "bg-[#2e2e2e] text-white" : "bg-transparent text-[#a1a1aa] hover:text-white"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[11px] text-[#71717a]">{MODES.find((m) => m.value === mode)?.blurb}</span>
-            </div>
-            <label className="text-[12px] text-[#a1a1aa] flex items-center gap-2">
-              Boundary $
-              <input
-                type="number"
-                step="0.25"
-                min="0.25"
-                value={boundary}
-                onChange={(e) => setBoundary(Number(e.target.value))}
-                className="w-20 bg-[#0F0F0F] border border-[#2a2a2a] rounded-md px-2 py-1 text-white"
-              />
-            </label>
-            <button
-              onClick={() =>
-                guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary }))
-              }
-              disabled={busy}
-              className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-white/90 disabled:opacity-70 cursor-pointer border-none"
-            >
-              {busy ? "Sending the pack…" : "Send the pack →"}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* assertive: hold gates demand immediate attention from screen readers */}
       <div aria-live="assertive" aria-atomic="true">
@@ -380,13 +343,85 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       </div>
 
       <div className="p-4 pt-2">
+        {RUNNING.has(view.state) && (
+          <div className="flex rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] p-0.5 mb-2">
+            {([
+              ["ask", "Ask Alpha"],
+              ["feed", "Add to the hunt"],
+            ] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setTarget(val)}
+                aria-pressed={target === val}
+                className={`flex-1 rounded-md px-2 py-1 text-[11.5px] cursor-pointer border-none transition-colors ${
+                  target === val ? "bg-[#2e2e2e] text-white" : "bg-transparent text-[#a1a1aa] hover:text-white"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Budget pill — only when plan is ready, just above the composer */}
+        {view.state === "plan_ready" && (
+          <div className="flex items-center gap-2 pb-2">
+            {!showBudget ? (
+              <button
+                onClick={() => setShowBudget(true)}
+                className="text-[11px] text-[#71717a] hover:text-[#a1a1aa] border border-[#2a2a2a] rounded-full px-2.5 py-0.5 cursor-pointer bg-transparent transition-colors"
+              >
+                Budget · ${boundary.toFixed(2)} ↕
+              </button>
+            ) : (
+              <span className="flex items-center gap-2 text-[11px] text-[#a1a1aa]">
+                $<input
+                  type="number"
+                  step="0.25"
+                  min="0.25"
+                  value={boundary}
+                  onChange={(e) => setBoundary(Number(e.target.value))}
+                  className="w-16 bg-[#0F0F0F] border border-[#2a2a2a] rounded px-1.5 py-0.5 text-white"
+                />
+                <button
+                  onClick={() => setShowBudget(false)}
+                  className="hover:text-white cursor-pointer bg-transparent border-none"
+                >
+                  Done
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
         <OneBox
-          placeholder="Ask Alpha anything…"
+          placeholder={
+            view.state === "plan_ready"
+              ? "Ask about the plan, or hit Send to launch…"
+              : target === "feed" && RUNNING.has(view.state)
+              ? "Add a source or note for the pack…"
+              : "Ask Alpha anything…"
+          }
           prefill={prefill}
-          onSubmit={(payload) => askAlpha(payload.text)}
+          packAction={
+            view.state === "plan_ready"
+              ? {
+                  label: "Send the pack →",
+                  onSend: () => guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary })),
+                  active: true,
+                }
+              : undefined
+          }
+          onSubmit={(payload) =>
+            target === "feed" && RUNNING.has(view.state)
+              ? addToHunt(payload.text)
+              : askAlpha(payload.text)
+          }
         />
         <p className="text-[10.5px] text-[#52525b] text-center mt-1.5">
-          Alpha can make mistakes. Check anything important.
+          {target === "feed" && RUNNING.has(view.state)
+            ? "The pack folds this in before its next step."
+            : "Alpha can make mistakes. Check anything important."}
         </p>
       </div>
     </aside>
