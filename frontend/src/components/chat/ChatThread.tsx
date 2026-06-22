@@ -8,9 +8,7 @@
 //   3. A "scroll to latest" button appears when the user has scrolled up.
 //   4. CSS scroll anchoring keeps the viewport stable when content above changes.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import Lenis from "lenis";
-import "lenis/dist/lenis.css";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown } from "react-icons/lu";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
 import { MarkdownReply } from "@/components/chat/MarkdownReply";
@@ -53,52 +51,47 @@ export function ChatThread({
   });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const lenisRef = useRef<Lenis | null>(null);
   const stickRef = useRef(true);
+  const prevLen = useRef(turns.length);
   const [showJump, setShowJump] = useState(false);
 
-  function scrollToBottom(immediate: boolean) {
-    const w = wrapperRef.current;
-    if (!w || !lenisRef.current) return;
-    lenisRef.current.scrollTo(w.scrollHeight, { immediate, duration: 0.5 });
+  function scrollToBottom(smooth: boolean) {
+    const el = wrapperRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
   }
 
-  // Lenis smooth scroll on this container + track whether we're stuck to the bottom.
+  // Track whether the user is stuck to the bottom (so we never yank them off history).
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const content = contentRef.current;
-    if (!wrapper || !content) return;
-
-    const lenis = new Lenis({ wrapper, content, lerp: 0.12, smoothWheel: true });
-    lenisRef.current = lenis;
-
-    let raf = 0;
-    const loop = (t: number) => {
-      lenis.raf(t);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-
+    const el = wrapperRef.current;
+    if (!el) return;
     const onScroll = () => {
-      const dist = content.scrollHeight - (wrapper.scrollTop + wrapper.clientHeight);
+      const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
       stickRef.current = dist < STICK_THRESHOLD;
       setShowJump(dist > STICK_THRESHOLD * 2);
     };
-    lenis.on("scroll", onScroll);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
-    // Follow new content (new turns + the streaming reveal) — but only while stuck to the bottom.
+  // Follow content growth (new turns + streaming tokens) while stuck to the bottom.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
     const ro = new ResizeObserver(() => {
-      if (stickRef.current) scrollToBottom(true);
+      if (stickRef.current) scrollToBottom(false);
     });
     ro.observe(content);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      lenis.destroy();
-      lenisRef.current = null;
-    };
+    return () => ro.disconnect();
   }, []);
+
+  // When the Packmaster sends a new message, always snap to the bottom (force-follow).
+  useLayoutEffect(() => {
+    if (turns.length > prevLen.current && turns[turns.length - 1]?.role === "user") {
+      stickRef.current = true;
+      scrollToBottom(false);
+    }
+    prevLen.current = turns.length;
+  }, [turns.length]);
 
   const hasContent = turns.length > 0 || pending;
 
