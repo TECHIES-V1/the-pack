@@ -9,7 +9,7 @@ import { StrategyPicker } from "@/components/composer/StrategyPicker";
 import { DenDrawer } from "@/components/den/DenDrawer";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { SettingsModal } from "@/components/settings/SettingsModal";
-import { api, streamSSE, type IntakeTurn, type StrategyName } from "@/net/api";
+import { api, streamSSE, ApiError, type IntakeTurn, type StrategyName } from "@/net/api";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
@@ -20,6 +20,15 @@ const INSTINCT_CHIPS = [
   { title: "The Pipeline", subtitle: "Research leads and draft outreach" },
   { title: "The Support Desk", subtitle: "Resolve tickets and draft replies" },
 ];
+
+const ERROR_MESSAGES: Record<string, string> = {
+  engine_down: "The engine isn't running — start it with `uvicorn app.main:app`.",
+  rate_limit: "Alpha is rate-limited — give it ~30 seconds and try again.",
+  timeout: "That took too long — the pack might be overloaded.",
+  content_filter: "That topic was filtered — try rephrasing.",
+  context_exceeded: "This conversation is too long — start a new one.",
+  unknown: "Couldn't reach Alpha — check the connection and try again.",
+};
 
 function goToPlan(huntId: string) {
   window.history.pushState({}, "", `/hunt/${huntId}/plan`);
@@ -33,7 +42,7 @@ export function DoorPage() {
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
-  const [error, setError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,7 +70,7 @@ export function DoorPage() {
         content: t.text,
       })),
     );
-    setError(false);
+    setErrorMsg(null);
     setPending(true);
     try {
       // Intake response is JSON so we only care about the `done` event.
@@ -78,8 +87,8 @@ export function DoorPage() {
           }
         }
       }
-    } catch {
-      setError(true);
+    } catch (err) {
+      setErrorMsg(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
       setPending(false);
     }
@@ -225,11 +234,9 @@ export function DoorPage() {
       </div>
     ) : null;
 
-  const errorBanner = error ? (
+  const errorBanner = errorMsg ? (
     <div className="w-[min(760px,92vw)] shrink-0 flex items-center gap-3 mb-2 px-1">
-      <span className="text-[13px] text-[#e6a23c]">
-        Couldn't reach Alpha just now — check the connection.
-      </span>
+      <span className="text-[13px] text-[#e6a23c]">{errorMsg}</span>
       <button
         onClick={retry}
         className="rounded-lg border border-[#2a2a2a] text-[#d4d4d8] hover:text-white px-3 py-1 text-[12px] cursor-pointer"

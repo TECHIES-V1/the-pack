@@ -15,15 +15,17 @@ import { HuntScreen } from "@/pages/HuntScreen";
 import { TracksPage } from "@/pages/TracksPage";
 import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
+import { ShareView } from "@/pages/ShareView";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
 import { StreamClient } from "@/net/streamClient";
 
-type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery";
+type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery" | "share";
 
 interface Route {
   view: View;
   huntId: string | null;
+  token?: string;
 }
 
 function parseRoute(): Route {
@@ -34,6 +36,7 @@ function parseRoute(): Route {
     if (sub === "scorecard") return { view: "scorecard", huntId: id };
     return { view: "hunt", huntId: id }; // /hunt/:id and /hunt/:id/plan
   }
+  if (path.startsWith("share/")) return { view: "share", huntId: null, token: path.slice("share/".length) };
   if (path === "gallery") return { view: "gallery", huntId: null };
   return { view: "door", huntId: null };
 }
@@ -74,6 +77,7 @@ export default function App() {
   else if (route.view === "hunt") page = <HuntScreen />;
   else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} />;
   else if (route.view === "scorecard") page = <ScorecardPage huntId={route.huntId ?? ""} />;
+  else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
   else page = <StatesGallery />;
 
   // reducedMotion="user" → framer-motion animations are skipped when the OS asks for reduced motion.

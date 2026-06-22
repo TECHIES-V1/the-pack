@@ -117,6 +117,21 @@ export function DocumentView({ huntId }: { huntId: string }) {
                 onClick={async () => {
                   setMenu(false);
                   try {
+                    const { token } = await api.shareHunt(huntId);
+                    await navigator.clipboard?.writeText(`${window.location.origin}/share/${token}`);
+                    flash("Share link copied");
+                  } catch {
+                    flash("Couldn't create link");
+                  }
+                }}
+              >
+                Copy share link
+              </button>
+              <button
+                className="w-full text-left px-3 py-2 hover:bg-[#242424]"
+                onClick={async () => {
+                  setMenu(false);
+                  try {
                     const snap = await api.getHunt(huntId);
                     // Store a loadable spec so re-running the instinct seeds the same task + strategy.
                     await api.saveInstinct(snap.task || title, {

@@ -12,13 +12,22 @@ import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { MessageActions } from "@/components/chat/MessageActions";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { OneBox } from "@/components/composer/OneBox";
-import { api, streamSSE, type IntakeTurn } from "@/net/api";
+import { api, streamSSE, ApiError, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
 const RUNNING = new Set(["hunting", "holding", "standoff", "finishing"]);
+
+const ERROR_MESSAGES: Record<string, string> = {
+  engine_down: "The engine isn't running — start it with `uvicorn app.main:app`.",
+  rate_limit: "Alpha is rate-limited — give it ~30 seconds and try again.",
+  timeout: "That took too long — try again.",
+  content_filter: "That topic was filtered — try rephrasing.",
+  context_exceeded: "This hunt's context is full — start a new one.",
+  unknown: "Couldn't reach Alpha — check the connection.",
+};
 
 const STRATEGY_LABEL: Record<string, string> = {
   orchestrate: "Dynamic orchestrator",
@@ -34,7 +43,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [askError, setAskError] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<string | undefined>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -98,7 +107,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         content: t.text,
       })),
     );
-    setAskError(false);
+    setAskError(null);
     setPending(true);
     startAlpha(); // open empty bubble immediately
     try {
@@ -106,9 +115,9 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         if (event.type === "token") addAlphaToken(event.text as string);
       }
       commitAlpha(); // strip dashes + persist to backend
-    } catch {
+    } catch (err) {
       dropLastAlpha(); // remove the partial bubble
-      setAskError(true);
+      setAskError(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
       setPending(false);
     }
@@ -318,7 +327,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
 
         {askError && (
           <div className="flex items-center gap-2.5">
-            <span className="text-[12px] text-[#e6a23c]">Couldn't reach Alpha.</span>
+            <span className="text-[12px] text-[#e6a23c]">{askError}</span>
             <button
               onClick={() => runAsk()}
               className="rounded-md border border-[#2a2a2a] text-[#d4d4d8] hover:text-white px-2.5 py-1 text-[12px] cursor-pointer"
