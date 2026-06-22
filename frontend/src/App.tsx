@@ -16,9 +16,13 @@ import { TracksPage } from "@/pages/TracksPage";
 import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { ShareView } from "@/pages/ShareView";
+import { SettingsModal } from "@/components/settings/SettingsModal";
+import { HuntCompleteToast } from "@/components/ui/HuntCompleteToast";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
+import { useUiStore } from "@/store/uiStore";
 import { StreamClient } from "@/net/streamClient";
+import { startNewHunt } from "@/lib/nav";
 
 type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery" | "share";
 
@@ -41,8 +45,11 @@ function parseRoute(): Route {
   return { view: "door", huntId: null };
 }
 
+const TERMINAL = new Set(["returned", "failed", "stopped_by_user"]);
+
 export default function App() {
   const [route, setRoute] = useState<Route>(parseRoute);
+  const { setDenOpen, setSettingsOpen, settingsOpen } = useUiStore();
 
   useEffect(() => {
     const onPop = () => setRoute(parseRoute());
@@ -50,21 +57,46 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Connect the live stream whenever a hunt is in the URL; keep it alive across plan→run→return.
+  // Global keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA";
+      if (e.key === "Escape") { setDenOpen(false); setSettingsOpen(false); }
+      if (mod && e.key === "k") { e.preventDefault(); setDenOpen((v) => !v); }
+      if (mod && e.key === ",") { e.preventDefault(); setSettingsOpen(true); }
+      // N for new hunt — only when not typing
+      if (e.key === "n" && !mod && !inInput) {
+        startNewHunt();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setDenOpen, setSettingsOpen]);
+
+  // Connect the live stream when a hunt enters the URL.
+  // Keep it alive when user navigates to Door — stream persists until terminal state.
   const connectedRef = useRef<string | null>(null);
   const clientRef = useRef<StreamClient | null>(null);
   useEffect(() => {
     const id = route.huntId;
     if (!id || connectedRef.current === id) return;
+    // Close previous client only if it's a *different* hunt
     clientRef.current?.close();
     useHuntStore.getState().reset();
-    // Keep the conversation across Door → plan (same hunt); start fresh for a different hunt.
     if (useChatStore.getState().huntId !== id) {
       useChatStore.getState().reset();
       useChatStore.getState().bindHunt(id);
     }
     const client = new StreamClient(id, {
-      onEvent: (ev) => useHuntStore.getState().apply(ev),
+      onEvent: (ev) => {
+        useHuntStore.getState().apply(ev);
+        // Close stream once hunt reaches a terminal state to save connections
+        if (TERMINAL.has(useHuntStore.getState().view.state)) {
+          client.close();
+        }
+      },
       getResumeSeq: () => useHuntStore.getState().view.lastSeq,
     });
     client.connect();
@@ -80,6 +112,11 @@ export default function App() {
   else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
   else page = <StatesGallery />;
 
-  // reducedMotion="user" → framer-motion animations are skipped when the OS asks for reduced motion.
-  return <MotionConfig reducedMotion="user">{page}</MotionConfig>;
+  return (
+    <MotionConfig reducedMotion="user">
+      {page}
+      {settingsOpen && <SettingsModal />}
+      <HuntCompleteToast />
+    </MotionConfig>
+  );
 }
