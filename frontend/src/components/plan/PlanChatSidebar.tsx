@@ -33,8 +33,10 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const [boundary, setBoundary] = useState(1.0);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [askError, setAskError] = useState(false);
   const [prefill, setPrefill] = useState<string | undefined>();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
 
   let lastAlpha = -1;
   turns.forEach((t, i) => {
@@ -45,10 +47,21 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     api.getHunt(huntId).then((s) => setTask(s.task)).catch(() => {});
   }, [huntId]);
 
-  // Pin to the newest line by scrolling the rail container itself (never the document root).
+  // Track whether the user is at the bottom (so we never yank them down while they read history).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickRef.current = el.scrollHeight - (el.scrollTop + el.clientHeight) < 120;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Pin to the newest line only when already at the bottom; never the document root.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [turns, pending]);
 
   const hold = view.openHold;
@@ -71,12 +84,13 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
       role: t.role === "alpha" ? "assistant" : "user",
       content: t.text,
     }));
+    setAskError(false);
     setPending(true);
     try {
       const { reply } = await api.ask(huntId, history);
       addAlpha(reply);
     } catch {
-      addAlpha("I couldn't reach you just now — try me again.");
+      setAskError(true);
     } finally {
       setPending(false);
     }
@@ -279,6 +293,18 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
             )}
 
         {pending && <ThinkingIndicator size={22} />}
+
+        {askError && (
+          <div className="flex items-center gap-2.5">
+            <span className="text-[12px] text-[#e6a23c]">Couldn't reach Alpha.</span>
+            <button
+              onClick={() => runAsk()}
+              className="rounded-md border border-[#2a2a2a] text-[#d4d4d8] hover:text-white px-2.5 py-1 text-[12px] cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {view.state === "failed" && (
           <div className="text-[13px] text-[#e03a2f]">The pack couldn't finish this one.</div>

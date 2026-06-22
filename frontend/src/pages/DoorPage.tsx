@@ -30,6 +30,7 @@ export function DoorPage() {
   const [recording, setRecording] = useState(false);
   const [folderToast, setFolderToast] = useState(false);
   const [strategy, setStrategy] = useState<StrategyName>("orchestrate");
+  const [error, setError] = useState(false);
   const folderToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
@@ -54,6 +55,7 @@ export function DoorPage() {
       role: t.role === "alpha" ? "assistant" : "user",
       content: t.text,
     }));
+    setError(false);
     setPending(true);
     try {
       const { reply, ready, brief } = await api.intake(convo);
@@ -64,10 +66,15 @@ export function DoorPage() {
         addAlpha(reply);
       }
     } catch {
-      addAlpha("I couldn't reach you just now — try me again.");
+      // Leave the thread at the user's turn and surface a real Retry, not a fake "reply".
+      setError(true);
     } finally {
       setPending(false);
     }
+  }
+
+  function retry() {
+    runIntake();
   }
 
   async function handleSend(text: string) {
@@ -201,6 +208,20 @@ export function DoorPage() {
       </div>
     ) : null;
 
+  const errorBanner = error ? (
+    <div className="w-[min(760px,92vw)] shrink-0 flex items-center gap-3 mb-2 px-1">
+      <span className="text-[13px] text-[#e6a23c]">
+        Couldn't reach Alpha just now — check the connection.
+      </span>
+      <button
+        onClick={retry}
+        className="rounded-lg border border-[#2a2a2a] text-[#d4d4d8] hover:text-white px-3 py-1 text-[12px] cursor-pointer"
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
+
   // Action-oriented disclaimer placed near the input (NN/g cites this placement; Claude as the model).
   const disclaimer = (
     <p className="text-[11px] text-[#52525b] text-center mt-1.5">
@@ -232,6 +253,7 @@ export function DoorPage() {
               onEdit={handleEdit}
             />
             {followUps}
+            {errorBanner}
             {launchChip}
             <div className="w-[min(760px,92vw)] shrink-0">
               {composer}
