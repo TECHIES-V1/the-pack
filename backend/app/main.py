@@ -33,7 +33,7 @@ from app.config import settings
 from app.db.pool import apply_schema, create_pool
 from app.db.repo import Repo
 from app.engine.core import Emitter
-from app.engine.ids import new_hunt_id, new_instinct_id
+from app.engine.ids import new_hunt_id, new_instinct_id, new_project_id
 from app.engine.benchmark import run_benchmark
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
@@ -366,9 +366,9 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
 
 
 @app.get("/hunts", tags=["hunts"])
-async def list_hunts(request: Request) -> dict:
-    """Recent hunts, newest first — the Den's Past Hunts list."""
-    return {"hunts": await _repo(request).list_hunts()}
+async def list_hunts(request: Request, project_id: str | None = None) -> dict:
+    """Recent hunts, newest first — the Den's Past Hunts list. Optionally scoped to a project."""
+    return {"hunts": await _repo(request).list_hunts(project_id=project_id)}
 
 
 @app.get("/hunts/{hunt_id}", response_model=HuntSnapshot, tags=["hunts"])
@@ -391,6 +391,7 @@ async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
 class HuntPatch(BaseModel):
     title: str | None = None
     archived: bool | None = None
+    project_id: str | None = None  # set to a project, or null to unassign (presence checked)
 
 
 class MessageIn(BaseModel):
@@ -406,6 +407,8 @@ async def patch_hunt(hunt_id: str, body: HuntPatch, request: Request) -> JSONRes
         await repo.rename_hunt(hunt_id, body.title.strip()[:120])
     if body.archived is not None:
         await repo.set_archived(hunt_id, body.archived)
+    if "project_id" in body.model_fields_set:  # presence, so null explicitly unassigns
+        await repo.assign_hunt(hunt_id, body.project_id)
     return JSONResponse({"hunt_id": hunt_id, "ok": True})
 
 
@@ -414,6 +417,50 @@ async def delete_hunt_route(hunt_id: str, request: Request) -> JSONResponse:
     """Delete a hunt and everything hanging off it."""
     await _repo(request).delete_hunt(hunt_id)
     return JSONResponse({"hunt_id": hunt_id, "deleted": True})
+
+
+# --- projects (workspaces) -------------------------------------------------------------
+
+
+class ProjectIn(BaseModel):
+    label: str
+    instructions: str | None = None
+
+
+class ProjectPatch(BaseModel):
+    label: str | None = None
+    instructions: str | None = None
+
+
+@app.get("/projects", tags=["projects"])
+async def list_projects(request: Request) -> dict:
+    """All projects with their (non-archived) hunt counts — powers the Den's project switcher."""
+    return {"projects": await _repo(request).list_projects()}
+
+
+@app.post("/projects", status_code=202, tags=["projects"])
+async def create_project(body: ProjectIn, request: Request) -> JSONResponse:
+    pid = new_project_id()
+    label = body.label.strip()[:120] or "Untitled project"
+    await _repo(request).create_project(pid, label, (body.instructions or "").strip() or None)
+    return JSONResponse(status_code=202, content={"project_id": pid, "label": label})
+
+
+@app.patch("/projects/{project_id}", tags=["projects"])
+async def patch_project(project_id: str, body: ProjectPatch, request: Request) -> JSONResponse:
+    await _repo(request).update_project(
+        project_id,
+        body.label.strip()[:120] if body.label else None,
+        body.instructions,
+    )
+    return JSONResponse({"project_id": project_id, "ok": True})
+
+
+@app.delete("/projects/{project_id}", tags=["projects"])
+async def delete_project_route(project_id: str, request: Request) -> JSONResponse:
+    """Drop the project; its hunts survive (just unassigned)."""
+    await _repo(request).delete_project(project_id)
+    return JSONResponse({"project_id": project_id, "deleted": True})
 
 
 @app.get("/hunts/{hunt_id}/messages", tags=["hunts"])

@@ -3,8 +3,8 @@
 // (Rename / delete / archive / pin need backend endpoints — flagged, not faked.)
 
 import { useEffect, useMemo, useState } from "react";
-import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard } from "react-icons/lu";
-import { api, type HuntListItem, type Instinct } from "@/net/api";
+import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard, LuFolderPlus, LuFolderInput } from "react-icons/lu";
+import { api, type HuntListItem, type Instinct, type Project } from "@/net/api";
 import { startNewHunt } from "@/lib/nav";
 import { useUiStore } from "@/store/uiStore";
 
@@ -54,22 +54,30 @@ export function DenDrawer() {
   const setOpen = useUiStore((s) => s.setDenOpen);
   const [hunts, setHunts] = useState<HuntListItem[]>([]);
   const [instincts, setInstincts] = useState<Instinct[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [q, setQ] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    Promise.allSettled([api.listHunts(), api.listInstincts()]).then(([h, i]) => {
+    Promise.allSettled([api.listHunts(), api.listInstincts(), api.listProjects()]).then(([h, i, p]) => {
       if (h.status === "fulfilled") setHunts(h.value.hunts);
       if (i.status === "fulfilled") setInstincts(i.value.instincts);
+      if (p.status === "fulfilled") setProjects(p.value.projects);
       setLoaded(true);
     });
   }, [open]);
 
   const ql = q.trim().toLowerCase();
+  // Scope to the active project (client-side — we already hold every hunt's project_id).
+  const scoped = useMemo(
+    () => (activeProject ? hunts.filter((h) => h.project_id === activeProject) : hunts),
+    [hunts, activeProject],
+  );
   const filteredHunts = useMemo(
-    () => (ql ? hunts.filter((h) => h.title.toLowerCase().includes(ql)) : hunts),
-    [hunts, ql],
+    () => (ql ? scoped.filter((h) => h.title.toLowerCase().includes(ql)) : scoped),
+    [scoped, ql],
   );
   const filteredInstincts = useMemo(
     () => (ql ? instincts.filter((i) => i.label.toLowerCase().includes(ql)) : instincts),
@@ -101,6 +109,48 @@ export function DenDrawer() {
     setHunts((hs) => hs.filter((x) => x.hunt_id !== h.hunt_id));
     api.deleteHunt(h.hunt_id).catch(() => {});
   }
+
+  function createProject() {
+    const label = window.prompt("New project name")?.trim();
+    if (!label) return;
+    api.createProject(label).then(({ project_id }) => {
+      setProjects((ps) => [
+        { project_id, label, instructions: null, hunt_count: 0, created_at: new Date().toISOString() },
+        ...ps,
+      ]);
+      setActiveProject(project_id);
+    }).catch(() => {});
+  }
+
+  function renameProject(p: Project) {
+    const label = window.prompt("Rename project", p.label)?.trim();
+    if (!label) return;
+    setProjects((ps) => ps.map((x) => (x.project_id === p.project_id ? { ...x, label } : x)));
+    api.patchProject(p.project_id, { label }).catch(() => {});
+  }
+
+  function deleteProject(p: Project) {
+    if (!window.confirm(`Delete project "${p.label}"? Its hunts stay — just unfiled.`)) return;
+    setProjects((ps) => ps.filter((x) => x.project_id !== p.project_id));
+    setHunts((hs) => hs.map((h) => (h.project_id === p.project_id ? { ...h, project_id: null } : h)));
+    if (activeProject === p.project_id) setActiveProject(null);
+    api.deleteProject(p.project_id).catch(() => {});
+  }
+
+  function assignHunt(h: HuntListItem, projectId: string | null) {
+    setHunts((hs) => hs.map((x) => (x.hunt_id === h.hunt_id ? { ...x, project_id: projectId } : x)));
+    setProjects((ps) =>
+      ps.map((p) => {
+        const was = h.project_id === p.project_id;
+        const now = projectId === p.project_id;
+        if (was === now) return p;
+        return { ...p, hunt_count: Math.max(0, p.hunt_count + (now ? 1 : -1)) };
+      }),
+    );
+    api.patchHunt(h.hunt_id, { project_id: projectId }).catch(() => {});
+  }
+
+  const activeProj = projects.find((p) => p.project_id === activeProject) ?? null;
 
   return (
     <>
@@ -142,6 +192,37 @@ export function DenDrawer() {
                   className="flex-1 bg-transparent border-none outline-none text-[13px] text-white placeholder:text-[#71717a]"
                 />
               </div>
+
+              {/* Project switcher — filter the Den to one workspace */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                <ProjChip label="All" active={!activeProject} onClick={() => setActiveProject(null)} />
+                {projects.map((p) => (
+                  <ProjChip
+                    key={p.project_id}
+                    label={p.hunt_count ? `${p.label} · ${p.hunt_count}` : p.label}
+                    active={activeProject === p.project_id}
+                    onClick={() => setActiveProject(p.project_id)}
+                  />
+                ))}
+                <button
+                  onClick={createProject}
+                  title="New project"
+                  className="shrink-0 flex items-center gap-1 rounded-full border border-dashed border-[#3a3a3a] text-[#71717a] hover:text-white hover:border-[#525252] px-2.5 py-1 text-[11px] cursor-pointer bg-transparent"
+                >
+                  <LuFolderPlus size={12} /> Project
+                </button>
+              </div>
+              {activeProj && (
+                <div className="flex items-center gap-2 text-[11px] text-[#71717a] px-0.5">
+                  <span>In “{activeProj.label}”</span>
+                  <button className="hover:text-white cursor-pointer bg-transparent border-none p-0" onClick={() => renameProject(activeProj)}>
+                    Rename
+                  </button>
+                  <button className="hover:text-[#ff6b5e] cursor-pointer bg-transparent border-none p-0" onClick={() => deleteProject(activeProj)}>
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6 scrollbar-subtle">
@@ -154,10 +235,12 @@ export function DenDrawer() {
                       <HuntRow
                         key={h.hunt_id}
                         hunt={h}
+                        projects={projects}
                         onOpen={() => openHunt(h.hunt_id)}
                         onRename={() => rename(h)}
                         onArchive={() => archive(h)}
                         onDelete={() => remove(h)}
+                        onAssign={(pid) => assignHunt(h, pid)}
                       />
                     ))}
                   </Section>
@@ -205,23 +288,28 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function HuntRow({
   hunt,
+  projects,
   onOpen,
   onRename,
   onArchive,
   onDelete,
+  onAssign,
 }: {
   hunt: HuntListItem;
+  projects: Project[];
   onOpen: () => void;
   onRename: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onAssign: (projectId: string | null) => void;
 }) {
+  const [menu, setMenu] = useState(false);
   const act = "p-1 rounded text-[#a1a1aa] hover:text-white hover:bg-white/10 cursor-pointer";
   return (
     <div className="group relative">
       <button
         onClick={onOpen}
-        className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-24 py-2.5 hover:border-[#404040] cursor-pointer w-full"
+        className="text-left bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg pl-3 pr-28 py-2.5 hover:border-[#404040] cursor-pointer w-full"
       >
         <div className="text-[13px] text-white truncate">{hunt.title}</div>
         <div className="text-[11px] text-[#71717a] mt-0.5 flex items-center gap-1.5">
@@ -243,6 +331,9 @@ function HuntRow({
         </button>
         {/* Destructive / management actions only on hover */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+          <button className={act} title="Move to project" aria-label="Move to project" onClick={() => setMenu((m) => !m)}>
+            <LuFolderInput size={13} />
+          </button>
           <button className={act} title="Rename" aria-label="Rename" onClick={onRename}>
             <LuPencil size={13} />
           </button>
@@ -259,7 +350,43 @@ function HuntRow({
           </button>
         </div>
       </div>
+      {menu && (
+        <div className="absolute right-1.5 top-full mt-1 z-10 w-44 bg-[#242424] border border-[#2a2a2a] rounded-lg py-1 text-[12px] shadow-lg">
+          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#71717a]">Move to project</div>
+          <button
+            className={`w-full text-left px-3 py-1.5 hover:bg-white/5 ${!hunt.project_id ? "text-white" : "text-[#a1a1aa]"}`}
+            onClick={() => { onAssign(null); setMenu(false); }}
+          >
+            No project
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.project_id}
+              className={`w-full text-left px-3 py-1.5 hover:bg-white/5 truncate ${hunt.project_id === p.project_id ? "text-white" : "text-[#a1a1aa]"}`}
+              onClick={() => { onAssign(p.project_id); setMenu(false); }}
+            >
+              {p.label}
+            </button>
+          ))}
+          {projects.length === 0 && <div className="px-3 py-1.5 text-[#52525b]">No projects yet</div>}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ProjChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] cursor-pointer border transition-colors ${
+        active
+          ? "bg-white text-black border-white"
+          : "bg-transparent text-[#a1a1aa] border-[#2a2a2a] hover:text-white hover:border-[#3a3a3a]"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

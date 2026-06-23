@@ -74,14 +74,20 @@ class Repo:
             "last_seq": await self.get_last_seq(hunt_id),
         }
 
-    async def list_hunts(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Most-recent, non-archived hunts first — powers the Den (Past Hunts)."""
+    async def list_hunts(
+        self, limit: int = 50, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Most-recent, non-archived hunts first — powers the Den (Past Hunts). Optionally scoped
+        to one project."""
         rows = await self._pool.fetch(
             """
-            SELECT hunt_id, state, source, raw_input, title, boundary_usd, created_at
-            FROM hunts WHERE archived = FALSE ORDER BY created_at DESC LIMIT $1
+            SELECT hunt_id, state, source, raw_input, title, boundary_usd, project_id, created_at
+            FROM hunts
+            WHERE archived = FALSE AND ($2::text IS NULL OR project_id = $2)
+            ORDER BY created_at DESC LIMIT $1
             """,
             limit,
+            project_id,
         )
         return [
             {
@@ -90,6 +96,7 @@ class Repo:
                 "source": r["source"],
                 "title": (r["title"] or (r["raw_input"] or "").strip()[:80]) or "Untitled hunt",
                 "boundary_usd": r["boundary_usd"],
+                "project_id": r["project_id"],
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows
@@ -112,6 +119,66 @@ class Repo:
         for tbl in ("messages", "events", "artifacts", "checkpoints"):
             await self._pool.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
         await self._pool.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
+
+    # --- projects (workspaces that group hunts) ----------------------------------------
+
+    async def list_projects(self) -> list[dict[str, Any]]:
+        rows = await self._pool.fetch(
+            """
+            SELECT p.project_id, p.label, p.instructions, p.created_at,
+                   COUNT(h.hunt_id) FILTER (WHERE h.archived = FALSE) AS hunt_count
+            FROM projects p
+            LEFT JOIN hunts h ON h.project_id = p.project_id
+            GROUP BY p.project_id
+            ORDER BY p.created_at DESC
+            """
+        )
+        return [
+            {
+                "project_id": r["project_id"],
+                "label": r["label"],
+                "instructions": r["instructions"],
+                "hunt_count": int(r["hunt_count"]),
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ]
+
+    async def create_project(self, project_id: str, label: str, instructions: str | None) -> None:
+        await self._pool.execute(
+            "INSERT INTO projects (project_id, label, instructions) VALUES ($1, $2, $3)",
+            project_id,
+            label,
+            instructions,
+        )
+
+    async def update_project(
+        self, project_id: str, label: str | None, instructions: str | None
+    ) -> None:
+        await self._pool.execute(
+            """
+            UPDATE projects SET label = COALESCE($2, label),
+                                instructions = COALESCE($3, instructions)
+            WHERE project_id = $1
+            """,
+            project_id,
+            label,
+            instructions,
+        )
+
+    async def delete_project(self, project_id: str) -> None:
+        """Drop the project but keep its hunts — just unassign them."""
+        await self._pool.execute(
+            "UPDATE hunts SET project_id = NULL WHERE project_id = $1", project_id
+        )
+        await self._pool.execute("DELETE FROM projects WHERE project_id = $1", project_id)
+
+    async def assign_hunt(self, hunt_id: str, project_id: str | None) -> None:
+        await self._pool.execute(
+            "UPDATE hunts SET project_id = $2, updated_at = now() WHERE hunt_id = $1",
+            hunt_id,
+            project_id,
+        )
 
     # --- conversation messages (durable per-hunt chat) ---------------------------------
 

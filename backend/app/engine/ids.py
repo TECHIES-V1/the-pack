@@ -31,3 +31,7 @@ def new_checkpoint_id() -> str:
 
 def new_instinct_id() -> str:
     return f"instinct_{ULID()}"
+
+
+def new_project_id() -> str:
+    return f"proj_{ULID()}"

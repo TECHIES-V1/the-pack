@@ -148,6 +148,14 @@ export interface HuntListItem {
   source: string;
   title: string;
   boundary_usd: number | null;
+  project_id: string | null;
+  created_at: string;
+}
+export interface Project {
+  project_id: string;
+  label: string;
+  instructions: string | null;
+  hunt_count: number;
   created_at: string;
 }
 export interface FinalArtifact {
@@ -196,11 +204,19 @@ export const api = {
   createHunt: (body: CreateHuntBody) => post<HuntCreated>("/hunts", body),
   getStrategies: () =>
     req<{ strategies: StrategyInfo[]; default: StrategyName }>("/strategies"),
-  listHunts: () => req<{ hunts: HuntListItem[] }>("/hunts"),
+  listHunts: (projectId?: string) =>
+    req<{ hunts: HuntListItem[] }>(`/hunts${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
   getHunt: (id: string) => req<HuntSnapshot>(`/hunts/${id}`),
-  patchHunt: (id: string, body: { title?: string; archived?: boolean }) =>
+  patchHunt: (id: string, body: { title?: string; archived?: boolean; project_id?: string | null }) =>
     patch<{ hunt_id: string; ok: boolean }>(`/hunts/${id}`, body),
   deleteHunt: (id: string) => del<{ hunt_id: string; deleted: boolean }>(`/hunts/${id}`),
+  // Projects (workspaces that group hunts)
+  listProjects: () => req<{ projects: Project[] }>("/projects"),
+  createProject: (label: string, instructions?: string) =>
+    post<{ project_id: string; label: string }>("/projects", { label, instructions }),
+  patchProject: (id: string, body: { label?: string; instructions?: string }) =>
+    patch<{ project_id: string; ok: boolean }>(`/projects/${id}`, body),
+  deleteProject: (id: string) => del<{ project_id: string; deleted: boolean }>(`/projects/${id}`),
   getMessages: (id: string) =>
     req<{ messages: { role: "user" | "alpha"; text: string }[] }>(`/hunts/${id}/messages`),
   saveMessage: (id: string, role: "user" | "alpha", content: string) =>
