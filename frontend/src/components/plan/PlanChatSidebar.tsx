@@ -50,6 +50,8 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const [task, setTask] = useState("");
   const [boundary, setBoundary] = useState(1.0);
   const [mode, setMode] = useState<Autonomy>("on_signal");
+  // Edited research angles before launch (null = untouched → no edits sent).
+  const [editedQueries, setEditedQueries] = useState<string[] | null>(null);
   const [pick, setPick] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
@@ -411,6 +413,24 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               </div>
               <span className="text-[11px] text-[#71717a]">{MODES.find((m) => m.value === mode)?.blurb}</span>
             </div>
+            {view.plan?.queries && view.plan.queries.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] text-[#a1a1aa]">Angles the pack will chase — edit any</span>
+                {(editedQueries ?? view.plan.queries).map((q, i) => (
+                  <input
+                    key={i}
+                    value={q}
+                    onChange={(e) => {
+                      const base = editedQueries ?? view.plan!.queries!;
+                      const next = [...base];
+                      next[i] = e.target.value;
+                      setEditedQueries(next);
+                    }}
+                    className="bg-[#0F0F0F] border border-[#2a2a2a] rounded-md px-2 py-1 text-[12px] text-white"
+                  />
+                ))}
+              </div>
+            )}
             <label className="flex items-center gap-2 text-[12px] text-[#a1a1aa]">
               Budget $
               <input
@@ -423,7 +443,15 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               />
             </label>
             <button
-              onClick={() => guard(() => api.approvePlan(huntId, { mode, boundary_usd: boundary }))}
+              onClick={() =>
+                guard(() => {
+                  const edits =
+                    editedQueries
+                      ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
+                      : undefined;
+                  return api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
+                })
+              }
               disabled={busy}
               className="bg-[#3fb27f] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#3fb27f]/90 disabled:opacity-70 cursor-pointer border-none"
             >

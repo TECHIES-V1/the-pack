@@ -61,6 +61,7 @@ export interface PlanView {
   est_cost: number;
   est_time: number;
   strategy?: string; // the selected research strategy (additive plan_proposed field)
+  queries?: string[]; // the angles the pack will chase (additive) — editable before approval
 }
 
 export interface HuntView {
@@ -153,6 +154,7 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           est_cost: f<number>(ev, "est_cost"),
           est_time: f<number>(ev, "est_time"),
           strategy: ev.payload["strategy"] as string | undefined,
+          queries: ev.payload["queries"] as string[] | undefined,
         },
       };
 
