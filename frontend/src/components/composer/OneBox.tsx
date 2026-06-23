@@ -114,8 +114,6 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
   }
 
   const canSubmit = value.trim().length > 0 || attachments.length > 0;
-  // When plan_ready and the composer is empty, the submit button morphs into the launch action.
-  const isPack = Boolean(packAction?.active && value.trim() === "" && attachments.length === 0);
 
   return (
     <div className="w-full bg-door-surface border border-door-border rounded-2xl px-4 pt-3.5 pb-3 flex flex-col gap-4">
@@ -300,41 +298,37 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
             )}
           </button>
 
-          {/* Submit — morphs into "Send the pack →" when plan_ready and input is empty */}
-          <AnimatePresence mode="wait" initial={false}>
-          {isPack ? (
-            <motion.button
-              key="pack"
-              onClick={packAction!.onSend}
-              whileTap={{ scale: 0.95 }}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.15 }}
-              className="bg-[#3fb27f] text-white rounded-xl px-3.5 py-2 text-[13px] font-medium cursor-pointer border-none shrink-0 whitespace-nowrap"
-            >
-              {packAction!.label}
-            </motion.button>
-          ) : (
-            <motion.button
-              key="arrow"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              whileTap={canSubmit ? { scale: 0.92 } : {}}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.15 }}
-              className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit
-                ? "bg-white text-door-bg cursor-pointer"
-                : "bg-door-border text-door-dim cursor-default"
-                }`}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </motion.button>
-          )}
+          {/* Arrow submit — always present, for asking / tweaking the plan */}
+          <motion.button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            whileTap={canSubmit ? { scale: 0.92 } : {}}
+            className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit
+              ? "bg-white text-door-bg cursor-pointer"
+              : "bg-door-border text-door-dim cursor-default"
+              }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </motion.button>
+
+          {/* Launch — lives ON the chat box, persistent while the plan is ready (never hides on type) */}
+          <AnimatePresence initial={false}>
+            {packAction?.active && (
+              <motion.button
+                key="pack"
+                onClick={packAction.onSend}
+                whileTap={{ scale: 0.95 }}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.15 }}
+                className="bg-[#3fb27f] text-white rounded-xl px-3.5 py-2 text-[13px] font-medium cursor-pointer border-none shrink-0 whitespace-nowrap"
+              >
+                {packAction.label}
+              </motion.button>
+            )}
           </AnimatePresence>
         </div>
       </div>

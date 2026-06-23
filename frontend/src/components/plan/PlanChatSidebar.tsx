@@ -391,8 +391,8 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           </div>
         )}
 
-        {/* Plan-ready gate — an unmistakable launch card (leash + budget + Send), pinned above the
-            composer so it never hides when you type. */}
+        {/* Plan-ready controls — leash + budget + angle edits. The launch button itself lives on the
+            chat box below (persistent), so this card carries the choices, not a duplicate Send. */}
         {view.state === "plan_ready" && (
           <div className={`${PANEL} p-3 mb-2 flex flex-col gap-2.5`}>
             <div className="flex flex-col gap-1.5">
@@ -442,21 +442,6 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
                 className="w-20 bg-[#0F0F0F] border border-[#2a2a2a] rounded-md px-2 py-1 text-white"
               />
             </label>
-            <button
-              onClick={() =>
-                guard(() => {
-                  const edits =
-                    editedQueries
-                      ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
-                      : undefined;
-                  return api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
-                })
-              }
-              disabled={busy}
-              className="bg-[#3fb27f] text-white rounded-lg px-4 py-2 text-[13px] font-medium hover:bg-[#3fb27f]/90 disabled:opacity-70 cursor-pointer border-none"
-            >
-              {busy ? "Sending the pack…" : "Send the pack →"}
-            </button>
           </div>
         )}
 
@@ -470,6 +455,21 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           }
           prefill={prefill}
           onFilesAdded={(files) => files[0] && attachFileToHunt(files[0])}
+          packAction={
+            view.state === "plan_ready"
+              ? {
+                  label: busy ? "Sending…" : "Send the pack →",
+                  active: true,
+                  onSend: () =>
+                    guard(() => {
+                      const edits = editedQueries
+                        ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
+                        : undefined;
+                      return api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
+                    }),
+                }
+              : undefined
+          }
           onSubmit={(payload) =>
             target === "feed" && RUNNING.has(view.state)
               ? addToHunt(payload.text)
