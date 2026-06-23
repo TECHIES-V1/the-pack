@@ -1,9 +1,8 @@
 """Image understanding via Qwen-VL (multimodal).
 
 Mirrors the offline switch used everywhere else: with no `QWEN_API_KEY` we return a deterministic
-stub so the whole parse → research pipeline still runs end-to-end without a key. With a key, we ask
-Qwen-VL to transcribe any text and describe the visual content, returning plain text the pack can
-research — exactly like a parsed PDF.
+stub so the whole parse → research pipeline still runs without a key. With a key, we ask Qwen-VL to
+transcribe any text and describe the visual content, returning plain text — like a parsed PDF.
 """
 
 from __future__ import annotations
@@ -42,6 +41,7 @@ async def describe_image(data: bytes, mime: str = "", filename: str = "") -> str
                 }
             ],
         )
-        return (res.choices[0].message.content or "").strip() or "[no readable content in the image]"
+        out = (res.choices[0].message.content or "").strip()
+        return out or "[no readable content in the image]"
     except Exception as exc:  # noqa: BLE001 — degrade to a note, never raise into the request
         return f"[could not read the image: {exc}]"
