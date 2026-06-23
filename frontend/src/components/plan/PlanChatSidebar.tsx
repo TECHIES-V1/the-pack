@@ -178,8 +178,8 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   // A file dropped on the rail is parsed and folded into the hunt as source material.
   async function attachFileToHunt(file: File) {
     const t = file.type;
-    if (t.startsWith("image/") || t.startsWith("video/")) {
-      addUser("📎 I can't read images or video yet — try a PDF, doc, spreadsheet, or audio file.");
+    if (t.startsWith("video/")) {
+      addUser("📎 I can't read video yet — try an image, PDF, doc, spreadsheet, or audio file.");
       return;
     }
     addUser(`📎 Reading ${file.name} into the hunt…`);

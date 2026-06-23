@@ -24,6 +24,10 @@ def detect_kind(filename: str, content_type: str = "") -> str:
         return "csv"
     if name.endswith((".md", ".markdown")):
         return "md"
+    if ct.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")):
+        return "image"
+    if ct.startswith("video/") or name.endswith((".mp4", ".mov", ".webm", ".avi", ".mkv")):
+        return "video"
     return "text"
 
 

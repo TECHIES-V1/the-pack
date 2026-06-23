@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from app.tools.file_parse import detect_kind, parse_bytes, parse_url
 from app.tools.redact import redact_event
+from app.tools.vision import describe_image
 from app.tools.transcribe import TRANSCRIBER
 
 from app.bus.redis_stream import EventBus
@@ -887,7 +888,12 @@ async def parse_document(
     if file is not None:
         data = await file.read()
         kind = detect_kind(file.filename or "", file.content_type or "")
-        text = parse_bytes(data, kind)
+        if kind == "image":
+            text = await describe_image(data, file.content_type or "", file.filename or "")
+        elif kind == "video":
+            text = "[video isn't supported yet — try an image, PDF, doc, spreadsheet, or audio file]"
+        else:
+            text = parse_bytes(data, kind)
         return JSONResponse({"kind": kind, "text": text, "chars": len(text), "filename": file.filename})
     return JSONResponse(status_code=400, content={"detail": "provide a file or a url"})
 

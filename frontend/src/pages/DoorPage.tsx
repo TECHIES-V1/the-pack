@@ -186,8 +186,8 @@ export function DoorPage() {
   // launches when there's a real task (the normal clarify-gate). It is NOT a forced hunt.
   async function parseAttachment(file: File) {
     const t = file.type;
-    if (t.startsWith("image/") || t.startsWith("video/")) {
-      addAlpha("I can't read images or video yet — try a PDF, doc, spreadsheet, or audio file.");
+    if (t.startsWith("video/")) {
+      addAlpha("I can't read video yet — try an image, PDF, doc, spreadsheet, or audio file.");
       return;
     }
     try {

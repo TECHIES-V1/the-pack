@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     qwen_model_max: str = "qwen-max"
     qwen_model_plus: str = "qwen-plus"
     qwen_model_flash: str = "qwen-flash"
+    qwen_model_vision: str = "qwen-vl-max"  # multimodal — reads images (Qwen-VL)
 
     # Voice (transcription) — access checked now, contract freezes Jun 16.
     qwen_voice_api_key: str = ""
