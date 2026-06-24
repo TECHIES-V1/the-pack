@@ -1,14 +1,23 @@
 // Scorecard — Lone Wolf vs The Pack (Doc 01/02, the benchmark). Shows the same task run two
-// ways and scored side by side: the pack's whole reason to exist.
-//
-// NOTE: the engine's /benchmark is a stub today, so these numbers are representative of the
-// design. Wire to a real benchmark run when it lands (Explicitly NEXT).
+// ways and scored side by side: the pack's whole reason to exist. Real data from the engine's
+// /benchmark run — if none exists yet, this triggers one and polls for the result.
 
+import { useEffect, useState } from "react";
 import { LuX } from "react-icons/lu";
+import { api, type Scorecard } from "@/net/api";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function fmtCost(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+function fmtTime(s: number): string {
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  return m ? `${m}m ${r}s` : `${r}s`;
 }
 
 interface Row {
@@ -18,15 +27,65 @@ interface Row {
   packWins: boolean;
 }
 
-const ROWS: Row[] = [
-  { label: "Sources found", lone: "2", pack: "9", packWins: true },
-  { label: "Accuracy", lone: "Repeated the 5M claim", pack: "Flagged it unverified", packWins: true },
-  { label: "Citations", lone: "0", pack: "3", packWins: true },
-  { label: "Cost", lone: "$0.18", pack: "$0.56", packWins: false },
-  { label: "Time", lone: "3m 30s", pack: "4m 30s", packWins: false },
-];
+function buildRows(c: Scorecard): Row[] {
+  return [
+    { label: "Quality", lone: c.lone_wolf.quality.toFixed(2), pack: c.pack.quality.toFixed(2), packWins: c.pack.quality >= c.lone_wolf.quality },
+    { label: "Sources found", lone: String(c.lone_wolf.sources), pack: String(c.pack.sources), packWins: c.pack.sources >= c.lone_wolf.sources },
+    { label: "Citations", lone: String(c.lone_wolf.citations), pack: String(c.pack.citations), packWins: c.pack.citations >= c.lone_wolf.citations },
+    { label: "Cost", lone: fmtCost(c.lone_wolf.cost_usd), pack: fmtCost(c.pack.cost_usd), packWins: c.pack.cost_usd <= c.lone_wolf.cost_usd },
+    { label: "Time", lone: fmtTime(c.lone_wolf.time_s), pack: fmtTime(c.pack.time_s), packWins: c.pack.time_s <= c.lone_wolf.time_s },
+  ];
+}
+
+type Status = "loading" | "running" | "ready" | "error";
 
 export function ScorecardPage({ huntId }: { huntId: string }) {
+  const [card, setCard] = useState<Scorecard | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const { scorecard } = await api.getScorecard(huntId);
+        if (!cancelled) {
+          setCard(scorecard);
+          setStatus("ready");
+        }
+        return;
+      } catch {
+        // No scorecard yet — kick off a real benchmark and poll for it.
+      }
+      if (cancelled) return;
+      setStatus("running");
+      try {
+        await api.benchmark(huntId);
+      } catch {
+        /* ignore — poll anyway */
+      }
+      for (let i = 0; i < 30 && !cancelled; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const { scorecard } = await api.getScorecard(huntId);
+          if (!cancelled) {
+            setCard(scorecard);
+            setStatus("ready");
+          }
+          return;
+        } catch {
+          /* not ready yet */
+        }
+      }
+      if (!cancelled) setStatus("error");
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [huntId]);
+
+  const rows = card ? buildRows(card) : [];
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center font-sans">
       <div className="w-[min(560px,92vw)] bg-[#1A1A1A] border border-[#2a2a2a] rounded-2xl text-white overflow-hidden">
@@ -37,30 +96,41 @@ export function ScorecardPage({ huntId }: { huntId: string }) {
           </button>
         </header>
 
-        <div className="px-6 py-2">
-          <div className="grid grid-cols-[1.4fr_1fr_1fr] gap-px text-[13px]">
-            <div className="py-3 text-[#71717a]" />
-            <div className="py-3 text-[#a1a1aa] text-center">Lone Wolf</div>
-            <div className="py-3 text-center font-medium flex items-center justify-center gap-1.5">
-              <span className="text-[#e6a23c]">★</span> The Pack
-            </div>
-            {ROWS.map((r) => (
-              <Cells key={r.label} row={r} />
-            ))}
+        {status !== "ready" ? (
+          <div className="px-6 py-12 text-center text-[13px] text-[#a1a1aa]">
+            {status === "error"
+              ? "Couldn't run the benchmark — make sure the engine is running and try again."
+              : status === "running"
+                ? "Running the lone wolf against the pack…"
+                : "Loading the scorecard…"}
           </div>
-        </div>
+        ) : (
+          <div className="px-6 py-2">
+            <div className="grid grid-cols-[1.4fr_1fr_1fr] gap-px text-[13px]">
+              <div className="py-3 text-[#71717a]" />
+              <div className="py-3 text-[#a1a1aa] text-center">Lone Wolf</div>
+              <div className="py-3 text-center font-medium flex items-center justify-center gap-1.5">
+                <span className="text-[#e6a23c]">★</span> The Pack
+              </div>
+              {rows.map((r) => (
+                <Cells key={r.label} row={r} />
+              ))}
+            </div>
+          </div>
+        )}
 
         <footer className="flex justify-end gap-2 px-6 py-4 border-t border-[#2a2a2a]">
           <button
             className="bg-transparent text-[#a1a1aa] border border-[#2a2a2a] rounded-lg px-4 py-2 text-[13px] cursor-pointer"
             onClick={() => goTo(`/hunt/${huntId}`)}
           >
-            Cancel
+            Close
           </button>
           <button
-            className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer border-none"
+            disabled={!card}
+            className="bg-white text-black rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer border-none disabled:opacity-50"
             onClick={() => {
-              const data = { hunt_id: huntId, comparison: ROWS };
+              const data = { hunt_id: huntId, scorecard: card };
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");

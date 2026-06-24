@@ -48,15 +48,33 @@ class FakeRepo:
     async def save_artifact(
         self, artifact_id: str, hunt_id: str, kind: str, produced_by: str | None, content: Any
     ) -> None:
-        self.artifacts.append({"artifact_id": artifact_id, "hunt_id": hunt_id, "kind": kind})
+        self.artifacts.append(
+            {
+                "artifact_id": artifact_id,
+                "hunt_id": hunt_id,
+                "kind": kind,
+                "produced_by": produced_by,
+                "content": content,
+            }
+        )
+
+    async def get_final_artifact(self, hunt_id: str) -> dict[str, Any] | None:
+        finals = [a for a in self.artifacts if a["hunt_id"] == hunt_id and a["kind"] == "final"]
+        return finals[-1] if finals else None
 
     async def save_checkpoint(
         self, checkpoint_id: str, hunt_id: str, at_seq: int, state: Any
     ) -> None:
         pass
 
+    async def get_instinct(self, instinct_id: str) -> dict[str, Any] | None:
+        return None
+
     def all_events(self, hunt_id: str) -> list[Event]:
         return self.events.get(hunt_id, [])
+
+    async def replay_events(self, hunt_id: str, from_seq: int = 0) -> list[Event]:
+        return [e for e in self.events.get(hunt_id, []) if e.seq >= from_seq]
 
 
 class CollectingBus:

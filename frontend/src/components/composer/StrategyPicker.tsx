@@ -3,12 +3,20 @@
 // The research strategy shapes the PLAN (it's picked at the Door, before launch) and is
 // orthogonal to the autonomy mode picked at approval. Three modes, one tap each.
 
-import type { StrategyName } from "@/net/api";
+import { useEffect, useState } from "react";
+import { api, type StrategyName } from "@/net/api";
 
-const OPTIONS: { name: StrategyName; label: string; hint: string }[] = [
-  { name: "orchestrate", label: "Orchestrate", hint: "Dynamic — the pack adapts as it learns." },
-  { name: "deep_dive", label: "Deep dive", hint: "Iterative — searches, finds gaps, searches again." },
-  { name: "critique", label: "Critique", hint: "Rigorous — Sentinel challenges weak claims." },
+// Curated product-voice hints (the engine's `pattern` is technical). Keyed by strategy name.
+const HINTS: Record<string, string> = {
+  orchestrate: "Dynamic — the pack adapts as it learns.",
+  deep_dive: "Iterative — searches, finds gaps, searches again.",
+  critique: "Rigorous — Sentinel challenges weak claims.",
+};
+
+const FALLBACK: { name: StrategyName; label: string; hint: string }[] = [
+  { name: "orchestrate", label: "Orchestrate", hint: HINTS.orchestrate },
+  { name: "deep_dive", label: "Deep dive", hint: HINTS.deep_dive },
+  { name: "critique", label: "Critique", hint: HINTS.critique },
 ];
 
 export function StrategyPicker({
@@ -20,9 +28,24 @@ export function StrategyPicker({
   onChange: (s: StrategyName) => void;
   disabled?: boolean;
 }) {
+  // Labels come from the engine's live catalog so renamed/added strategies surface here; the
+  // hardcoded list is just the offline fallback.
+  const [options, setOptions] = useState(FALLBACK);
+  useEffect(() => {
+    api
+      .getStrategies()
+      .then(({ strategies }) => {
+        if (strategies?.length) {
+          setOptions(
+            strategies.map((s) => ({ name: s.name, label: s.label, hint: HINTS[s.name] ?? s.pattern })),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
   return (
     <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Research strategy">
-      {OPTIONS.map((o) => {
+      {options.map((o) => {
         const on = value === o.name;
         return (
           <button

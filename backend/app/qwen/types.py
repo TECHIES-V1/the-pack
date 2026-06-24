@@ -19,6 +19,7 @@ class CallSpec:
     messages: list[dict] | None = None
     response_schema: dict | None = None  # structured output for handoffs
     intent: str | None = None  # a hint the fake provider keys its canned answer on
+    force_stream: bool = False  # force streaming even when thinking mode is off
 
 
 @dataclass

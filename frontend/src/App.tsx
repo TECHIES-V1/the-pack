@@ -8,21 +8,28 @@
 //   /gallery               states gallery (dev)
 
 import { useEffect, useRef, useState } from "react";
+import { MotionConfig } from "framer-motion";
 
 import { DoorPage } from "@/pages/DoorPage";
 import { HuntScreen } from "@/pages/HuntScreen";
 import { TracksPage } from "@/pages/TracksPage";
 import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
+import { ShareView } from "@/pages/ShareView";
+import { SettingsModal } from "@/components/settings/SettingsModal";
+import { HuntCompleteToast } from "@/components/ui/HuntCompleteToast";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
+import { useUiStore } from "@/store/uiStore";
 import { StreamClient } from "@/net/streamClient";
+import { startNewHunt } from "@/lib/nav";
 
-type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery";
+type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery" | "share";
 
 interface Route {
   view: View;
   huntId: string | null;
+  token?: string;
 }
 
 function parseRoute(): Route {
@@ -33,12 +40,16 @@ function parseRoute(): Route {
     if (sub === "scorecard") return { view: "scorecard", huntId: id };
     return { view: "hunt", huntId: id }; // /hunt/:id and /hunt/:id/plan
   }
+  if (path.startsWith("share/")) return { view: "share", huntId: null, token: path.slice("share/".length) };
   if (path === "gallery") return { view: "gallery", huntId: null };
   return { view: "door", huntId: null };
 }
 
+const TERMINAL = new Set(["returned", "failed", "stopped_by_user"]);
+
 export default function App() {
   const [route, setRoute] = useState<Route>(parseRoute);
+  const { setDenOpen, setSettingsOpen, settingsOpen } = useUiStore();
 
   useEffect(() => {
     const onPop = () => setRoute(parseRoute());
@@ -46,21 +57,46 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Connect the live stream whenever a hunt is in the URL; keep it alive across plan→run→return.
+  // Global keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA";
+      if (e.key === "Escape") { setDenOpen(false); setSettingsOpen(false); }
+      if (mod && e.key === "k") { e.preventDefault(); setDenOpen((v) => !v); }
+      if (mod && e.key === ",") { e.preventDefault(); setSettingsOpen(true); }
+      // N for new hunt — only when not typing
+      if (e.key === "n" && !mod && !inInput) {
+        startNewHunt();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setDenOpen, setSettingsOpen]);
+
+  // Connect the live stream when a hunt enters the URL.
+  // Keep it alive when user navigates to Door — stream persists until terminal state.
   const connectedRef = useRef<string | null>(null);
   const clientRef = useRef<StreamClient | null>(null);
   useEffect(() => {
     const id = route.huntId;
     if (!id || connectedRef.current === id) return;
+    // Close previous client only if it's a *different* hunt
     clientRef.current?.close();
     useHuntStore.getState().reset();
-    // Keep the conversation across Door → plan (same hunt); start fresh for a different hunt.
     if (useChatStore.getState().huntId !== id) {
       useChatStore.getState().reset();
       useChatStore.getState().bindHunt(id);
     }
     const client = new StreamClient(id, {
-      onEvent: (ev) => useHuntStore.getState().apply(ev),
+      onEvent: (ev) => {
+        useHuntStore.getState().apply(ev);
+        // Close stream once hunt reaches a terminal state to save connections
+        if (TERMINAL.has(useHuntStore.getState().view.state)) {
+          client.close();
+        }
+      },
       getResumeSeq: () => useHuntStore.getState().view.lastSeq,
     });
     client.connect();
@@ -68,9 +104,19 @@ export default function App() {
     connectedRef.current = id;
   }, [route.huntId]);
 
-  if (route.view === "door") return <DoorPage />;
-  if (route.view === "hunt") return <HuntScreen />;
-  if (route.view === "tracks") return <TracksPage huntId={route.huntId ?? ""} />;
-  if (route.view === "scorecard") return <ScorecardPage huntId={route.huntId ?? ""} />;
-  return <StatesGallery />;
+  let page: React.ReactNode;
+  if (route.view === "door") page = <DoorPage />;
+  else if (route.view === "hunt") page = <HuntScreen />;
+  else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} />;
+  else if (route.view === "scorecard") page = <ScorecardPage huntId={route.huntId ?? ""} />;
+  else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
+  else page = <StatesGallery />;
+
+  return (
+    <MotionConfig reducedMotion="user">
+      {page}
+      {settingsOpen && <SettingsModal />}
+      <HuntCompleteToast />
+    </MotionConfig>
+  );
 }

@@ -11,6 +11,12 @@ interface AttachedFile {
   status: "uploading" | "ready";
 }
 
+interface PackAction {
+  label: string;
+  onSend: () => void;
+  active: boolean;
+}
+
 interface OneBoxProps {
   droppedFiles?: File[];
   prefill?: string;
@@ -20,9 +26,13 @@ interface OneBoxProps {
   onFolderRejected?: () => void;
   onSubmit?: (payload: { text: string; attachments: AttachedFile[]; mode: Mode }) => void;
   onRecordingChange?: (recording: boolean) => void;
+  /** Hide the Signal/On Wild/On Command autonomy dropdown (it only matters at plan-approval). */
+  hideMode?: boolean;
+  /** When set and the composer is empty, the submit button morphs into the pack launch action. */
+  packAction?: PackAction;
 }
 
-export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange }: OneBoxProps) {
+export function OneBox({ droppedFiles = [], prefill, placeholder = "What should the pack hunt down?", onFilesAdded, onFileRemoved, onFolderRejected, onSubmit, onRecordingChange, hideMode, packAction }: OneBoxProps) {
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
@@ -227,9 +237,9 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
 
         {/* Right side actions */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Signal mode dropdown — hidden when recording */}
+          {/* Signal mode dropdown — hidden when recording, or when the host hides it (the Door) */}
           <div className="relative" ref={dropdownRef}
-            style={{ display: recording ? "none" : undefined }}
+            style={{ display: recording || hideMode ? "none" : undefined }}
           >
             <button
               onClick={() => setModeOpen((o) => !o)}
@@ -288,7 +298,7 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
             )}
           </button>
 
-          {/* Submit */}
+          {/* Arrow submit — always present, for asking / tweaking the plan */}
           <motion.button
             onClick={handleSubmit}
             disabled={!canSubmit}
@@ -302,6 +312,24 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
               <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </motion.button>
+
+          {/* Launch — lives ON the chat box, persistent while the plan is ready (never hides on type) */}
+          <AnimatePresence initial={false}>
+            {packAction?.active && (
+              <motion.button
+                key="pack"
+                onClick={packAction.onSend}
+                whileTap={{ scale: 0.95 }}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.15 }}
+                className="bg-[#3fb27f] text-white rounded-xl px-3.5 py-2 text-[13px] font-medium cursor-pointer border-none shrink-0 whitespace-nowrap"
+              >
+                {packAction.label}
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

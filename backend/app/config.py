@@ -21,10 +21,12 @@ class Settings(BaseSettings):
     qwen_model_max: str = "qwen-max"
     qwen_model_plus: str = "qwen-plus"
     qwen_model_flash: str = "qwen-flash"
+    qwen_model_vision: str = "qwen-vl-max"  # multimodal — reads images (Qwen-VL)
 
     # Voice (transcription) — access checked now, contract freezes Jun 16.
     qwen_voice_api_key: str = ""
     qwen_voice_base_url: str = ""
+    qwen_voice_model: str = "paraformer-realtime-v2"
 
     # Seam + durable store.
     redis_url: str = "redis://localhost:6379/0"
@@ -40,6 +42,10 @@ class Settings(BaseSettings):
 
     # Boundary.
     first_hunt_cap_usd: float = 0.50
+
+    # A wolf's single dispatch may not exceed this wall-clock before it's ruled a Stray and
+    # rerouted (anomaly path — generous so only true hangs trip it).
+    step_timeout_s: float = 120.0
 
     # Web search (real research). An empty key falls back to the deterministic canned
     # provider, so the whole engine still runs offline end to end (Doc 04 §07).

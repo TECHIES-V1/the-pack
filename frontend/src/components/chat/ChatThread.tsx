@@ -8,12 +8,12 @@
 //   3. A "scroll to latest" button appears when the user has scrolled up.
 //   4. CSS scroll anchoring keeps the viewport stable when content above changes.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import Lenis from "lenis";
-import "lenis/dist/lenis.css";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown } from "react-icons/lu";
 import { AlphaAvatar } from "@/components/chat/AlphaAvatar";
-import { RevealedMarkdown } from "@/components/chat/RevealedMarkdown";
+import { MarkdownReply } from "@/components/chat/MarkdownReply";
+import { MessageActions } from "@/components/chat/MessageActions";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useChatStore } from "@/store/chatStore";
 
 const STICK_THRESHOLD = 120; // px from bottom that still counts as "at the bottom"
@@ -27,6 +27,10 @@ interface ChatThreadProps {
   footer?: ReactNode;
   /** Shown before any turns exist (e.g. the hunt rail's task bubble fallback). */
   empty?: ReactNode;
+  /** Re-run the last user turn (shown on the latest Alpha reply). */
+  onRegenerate?: () => void;
+  /** Edit & resend the user turn at this index. */
+  onEdit?: (index: number) => void;
 }
 
 export function ChatThread({
@@ -36,91 +40,119 @@ export function ChatThread({
   bubbleClass = "text-[14px]",
   footer,
   empty,
+  onRegenerate,
+  onEdit,
 }: ChatThreadProps) {
   const turns = useChatStore((s) => s.turns);
   const pending = useChatStore((s) => s.pending);
+  const abortFn = useChatStore((s) => s.abortFn);
+  const abortAlpha = useChatStore((s) => s.abortAlpha);
+  let lastAlpha = -1;
+  turns.forEach((t, i) => {
+    if (t.role === "alpha") lastAlpha = i;
+  });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const lenisRef = useRef<Lenis | null>(null);
   const stickRef = useRef(true);
+  const prevLen = useRef(turns.length);
   const [showJump, setShowJump] = useState(false);
 
-  function scrollToBottom(immediate: boolean) {
-    const w = wrapperRef.current;
-    if (!w || !lenisRef.current) return;
-    lenisRef.current.scrollTo(w.scrollHeight, { immediate, duration: 0.5 });
+  function scrollToBottom(smooth: boolean) {
+    const el = wrapperRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
   }
 
-  // Lenis smooth scroll on this container + track whether we're stuck to the bottom.
+  // Track whether the user is stuck to the bottom (so we never yank them off history).
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const content = contentRef.current;
-    if (!wrapper || !content) return;
-
-    const lenis = new Lenis({ wrapper, content, lerp: 0.12, smoothWheel: true });
-    lenisRef.current = lenis;
-
-    let raf = 0;
-    const loop = (t: number) => {
-      lenis.raf(t);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-
+    const el = wrapperRef.current;
+    if (!el) return;
     const onScroll = () => {
-      const dist = content.scrollHeight - (wrapper.scrollTop + wrapper.clientHeight);
+      const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
       stickRef.current = dist < STICK_THRESHOLD;
       setShowJump(dist > STICK_THRESHOLD * 2);
     };
-    lenis.on("scroll", onScroll);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
-    // Follow new content (new turns + the streaming reveal) — but only while stuck to the bottom.
+  // Follow content growth (new turns + streaming tokens) while stuck to the bottom.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
     const ro = new ResizeObserver(() => {
-      if (stickRef.current) scrollToBottom(true);
+      if (stickRef.current) scrollToBottom(false);
     });
     ro.observe(content);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      lenis.destroy();
-      lenisRef.current = null;
-    };
+    return () => ro.disconnect();
   }, []);
+
+  // When the Packmaster sends a new message, always snap to the bottom (force-follow).
+  useLayoutEffect(() => {
+    if (turns.length > prevLen.current && turns[turns.length - 1]?.role === "user") {
+      stickRef.current = true;
+      scrollToBottom(false);
+    }
+    prevLen.current = turns.length;
+  }, [turns.length]);
 
   const hasContent = turns.length > 0 || pending;
 
   return (
     <div className={`relative ${className}`}>
       <div ref={wrapperRef} className="h-full overflow-y-auto scrollbar-subtle" style={{ overflowAnchor: "none" }}>
-        <div ref={contentRef} className="flex flex-col gap-4 py-1">
+        <div
+          ref={contentRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          className="flex flex-col gap-4 py-1"
+        >
           {!hasContent ? (
             empty
           ) : (
             <>
               {turns.map((t, i) =>
                 t.role === "user" ? (
-                  <div
-                    key={i}
-                    className={`bg-[#242424] rounded-2xl px-4 py-2.5 text-[#e4e4e7] self-end max-w-[85%] ${bubbleClass}`}
-                  >
-                    {t.text}
+                  <div key={i} className="group flex flex-col items-end gap-1 self-end max-w-[85%]">
+                    <div className={`bg-[#242424] rounded-2xl px-4 py-2.5 text-[#e4e4e7] ${bubbleClass}`}>
+                      {t.text}
+                    </div>
+                    <MessageActions
+                      text={t.text}
+                      role="user"
+                      onEdit={onEdit ? () => onEdit(i) : undefined}
+                    />
                   </div>
                 ) : (
-                  <div key={i} className="flex gap-2.5 items-start max-w-[90%]">
+                  <div key={i} className="group flex gap-2.5 items-start max-w-[90%]">
                     <AlphaAvatar size={avatarSize} />
-                    <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
-                      <RevealedMarkdown text={t.text} />
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <div className={`text-[#d4d4d8] pt-0.5 ${textClass}`}>
+                        <MarkdownReply text={t.text} />
+                      </div>
+                      <MessageActions
+                        text={t.text}
+                        role="alpha"
+                        canRegenerate={i === lastAlpha}
+                        onRegenerate={onRegenerate}
+                      />
                     </div>
                   </div>
                 ),
               )}
 
               {pending && (
-                <div className="flex gap-2.5 items-center">
-                  <AlphaAvatar size={avatarSize} />
-                  <span className="text-[13px] text-[#71717a] italic">Alpha is thinking…</span>
-                </div>
+                <>
+                  <ThinkingIndicator size={avatarSize} />
+                  {abortFn && (
+                    <button
+                      onClick={abortAlpha}
+                      className="self-start ml-10 text-[12px] text-[#a1a1aa] border border-[#2a2a2a] rounded-md px-2.5 py-1 hover:text-white cursor-pointer bg-transparent"
+                    >
+                      Stop reply
+                    </button>
+                  )}
+                </>
               )}
 
               {footer}

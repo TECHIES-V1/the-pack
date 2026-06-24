@@ -29,10 +29,17 @@ export function TraceRail({ feed }: { feed: FeedLine[] }) {
   return (
     <div className="absolute top-3 right-3 z-10 w-[264px] max-h-[calc(100%-24px)] flex flex-col rounded-[10px] border border-[#262626] bg-[#0d0d0d]/85 backdrop-blur-sm overflow-hidden shadow-lg">
       <div className="px-3 py-2 border-b border-[#222] text-[11px] uppercase tracking-[0.08em] text-[#71717a] flex items-center gap-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#3fb27f] animate-pulse" />
+        <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-[#3fb27f] animate-pulse" />
         Live trace
       </div>
-      <div ref={ref} className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2 scrollbar-subtle">
+      <div
+        ref={ref}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Pack activity trace"
+        className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2 scrollbar-subtle"
+      >
         {feed.length === 0 ? (
           <div className="text-[11px] text-[#52525b] px-1 py-1">The pack hasn't moved yet.</div>
         ) : (

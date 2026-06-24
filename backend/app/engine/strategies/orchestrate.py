@@ -6,6 +6,8 @@ conflict appears in the findings. The default strategy: the broadest, most adapt
 
 from __future__ import annotations
 
+import asyncio
+
 from app.engine.strategies.base import Engine, Strategy
 
 
@@ -18,11 +20,9 @@ class OrchestrateStrategy(Strategy):
         ids = engine.scout_ids()
         queries = engine.queries()
 
-        findings = []
-        for wolf_id, query in zip(ids, queries):
-            finding = await engine.scout(wolf_id, query)
-            if finding:
-                findings.append(finding)
+        # The scouts range in PARALLEL — that's where the pack structurally wins on latency.
+        results = await asyncio.gather(*(engine.scout(w, q) for w, q in zip(ids, queries)))
+        findings = [f for f in results if f]
 
         # Adaptive touch: if the pack came back thin (a scout failed), broaden and range again.
         if len([f for f in findings if f.confidence >= 0.4]) < 2 and ids:

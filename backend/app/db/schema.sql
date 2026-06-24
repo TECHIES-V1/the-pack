@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS hunts (
 -- Older deployments may predate `strategy`; add it without disturbing existing rows.
 ALTER TABLE hunts ADD COLUMN IF NOT EXISTS strategy TEXT NOT NULL DEFAULT 'orchestrate';
 
+-- History management + sharing: a user-editable title, an archive flag, a project grouping, and a
+-- public share token. All additive so existing rows are untouched.
+ALTER TABLE hunts ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE hunts ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE hunts ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE hunts ADD COLUMN IF NOT EXISTS share_token TEXT;
+
 -- The event log. Append-only, never edited. This table IS the transactional outbox:
 -- `relayed` marks whether the outbox relay has published the row to Redis yet.
 -- PK (hunt_id, seq) is the real ordering backstop — it rejects any duplicate seq.
@@ -54,11 +61,39 @@ CREATE TABLE IF NOT EXISTS artifacts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Conversation with Alpha, per hunt — so reopening a hunt restores its real chat (cross-device,
+-- not just this browser's localStorage).
+CREATE TABLE IF NOT EXISTS messages (
+    hunt_id    TEXT        NOT NULL,
+    seq        INTEGER     NOT NULL,
+    role       TEXT        NOT NULL,                     -- user | alpha
+    content    TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (hunt_id, seq)
+);
+
+-- Projects: a named workspace that groups hunts (+ shared instructions).
+CREATE TABLE IF NOT EXISTS projects (
+    project_id   TEXT PRIMARY KEY,
+    label        TEXT        NOT NULL,
+    instructions TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Instincts: saved plan presets that survive across hunts (the Den).
 CREATE TABLE IF NOT EXISTS instincts (
     instinct_id TEXT PRIMARY KEY,
     label       TEXT        NOT NULL,
     spec        JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Feedback: thumbs up/down votes on Alpha replies (turn_index matches the chatStore turn array).
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    hunt_id     TEXT        NOT NULL,
+    turn_index  INT         NOT NULL,
+    vote        TEXT        NOT NULL CHECK (vote IN ('up', 'down')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -61,6 +61,7 @@ export interface PlanView {
   est_cost: number;
   est_time: number;
   strategy?: string; // the selected research strategy (additive plan_proposed field)
+  queries?: string[]; // the angles the pack will chase (additive) — editable before approval
 }
 
 export interface HuntView {
@@ -153,8 +154,17 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           est_cost: f<number>(ev, "est_cost"),
           est_time: f<number>(ev, "est_time"),
           strategy: ev.payload["strategy"] as string | undefined,
+          queries: ev.payload["queries"] as string[] | undefined,
         },
       };
+
+    case "plan_edited": {
+      // The user tweaked the plan before launch; reflect edited assumptions in the shown plan.
+      const diff = (ev.payload["diff"] ?? {}) as { assumptions?: string[] };
+      const plan =
+        s.plan && Array.isArray(diff.assumptions) ? { ...s.plan, assumptions: diff.assumptions } : s.plan;
+      return { ...s, plan, feed: feed(s, ev, "Updated the plan before the hunt.") };
+    }
 
     case "plan_approved":
       return {
@@ -240,7 +250,15 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       const wolves = w
         ? patchWolf(s, wolfId, { spendUsd: w.spendUsd + Number(f<number>(ev, "cost_usd") || 0) })
         : s.wolves;
-      return { ...s, wolves, boundary: boundaryWith(s, f<number>(ev, "cumulative_usd")) };
+      // Spend resuming after a Boundary halt means the human raised the cap — leave the halt.
+      const resumed = s.state === "halted_boundary";
+      const status: BoundaryStatus = resumed ? "normal" : s.boundary.status;
+      return {
+        ...s,
+        state: resumed ? "hunting" : s.state,
+        wolves,
+        boundary: boundaryWith(s, f<number>(ev, "cumulative_usd"), status),
+      };
     }
 
     case "hold_opened":
@@ -266,6 +284,9 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         activeStandoffId: f(ev, "standoff_id"),
         feed: feed(s, ev, `${f(ev, "challenger")} challenged ${f(ev, "defendant")}.`),
       };
+
+    case "standoff_turn":
+      return { ...s, feed: feed(s, ev, f(ev, "argument_summary")) };
 
     case "standoff_resolved":
       return {
@@ -320,6 +341,25 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
 
     case "hunt_stopped":
       return { ...s, state: "stopped_by_user" };
+
+    case "input_added":
+      return {
+        ...s,
+        feed: feed(
+          s,
+          ev,
+          f<boolean>(ev, "mid_hunt") ? "You added context to the hunt." : "Added your material to the hunt.",
+        ),
+      };
+
+    case "transcript_ready":
+      return { ...s, feed: feed(s, ev, "Transcribed your audio into the hunt.") };
+
+    case "benchmark_started":
+      return { ...s, feed: feed(s, ev, "Benchmarking the pack against a lone wolf…") };
+
+    case "benchmark_completed":
+      return { ...s, feed: feed(s, ev, "The scorecard is ready.") };
 
     default:
       return s;
