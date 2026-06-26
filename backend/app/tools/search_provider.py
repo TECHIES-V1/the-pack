@@ -108,7 +108,7 @@ class MultiProvider:
         start = time.monotonic()
         per = max(3, max_results // 2)
         tasks = [asyncio.create_task(self._guarded(s, query, per)) for s in self._subs]
-        # Return on the budget with whatever finished; cancel stragglers (no waiting on the slowest).
+        # Budget the fan-out: keep what finished, cancel stragglers, never wait on the slowest.
         done, pending = await asyncio.wait(tasks, timeout=_SEARCH_BUDGET_S)
         for t in pending:
             t.cancel()
