@@ -171,6 +171,26 @@ async def test_multiprovider_isolates_a_failing_sub():
     assert [h.url for h in res.hits] == ["https://x.com"]  # the crash didn't sink the search
 
 
+async def test_multiprovider_returns_within_budget(monkeypatch):
+    import asyncio
+
+    import app.tools.search_provider as sp
+
+    monkeypatch.setattr(sp, "_SEARCH_BUDGET_S", 0.2)
+
+    class _Slow:
+        name = "slow"
+
+        async def search(self, query, *, max_results):
+            await asyncio.sleep(2)
+            return [SearchHit("slow", "https://slow.com", "s")]
+
+    fast = SearchHit("F", "https://fast.com", "s", score=0.5)
+    mp = sp.MultiProvider([_Slow(), _FakeSub([fast])], readers=[])
+    res = await mp.search("q", max_results=8)
+    assert [h.url for h in res.hits] == ["https://fast.com"]  # slow upstream cancelled at budget
+
+
 def test_offline_fallback_when_no_keys(monkeypatch):
     for k in (
         "search_api_key",

@@ -79,6 +79,18 @@ class CannedProvider:
         return f"[offline] readable text extracted from {url}."
 
 
+# A fan-out returns within this budget: take what the fast providers gave, cancel the stragglers — so
+# one slow/hung upstream can't make every search wait out its full timeout.
+_SEARCH_BUDGET_S = 7.0
+
+# Cap concurrent calls to the SAME upstream across parallel scouts — light rate-limit politeness.
+_PROVIDER_SEM: dict[str, asyncio.Semaphore] = {}
+
+
+def _sem(name: str) -> asyncio.Semaphore:
+    return _PROVIDER_SEM.setdefault(name, asyncio.Semaphore(2))
+
+
 class MultiProvider:
     """Fan a query out to every upstream; merge, dedupe, rank. Deep-read via the reader chain."""
 
@@ -88,16 +100,24 @@ class MultiProvider:
         self._subs = subs
         self._readers = readers
 
+    async def _guarded(self, sub: SubProvider, query: str, per: int) -> list[SearchHit]:
+        async with _sem(sub.name):
+            return await sub.search(query, max_results=per)
+
     async def search(self, query: str, *, max_results: int = 8) -> SearchResults:
         start = time.monotonic()
         per = max(3, max_results // 2)
-        results = await asyncio.gather(
-            *(s.search(query, max_results=per) for s in self._subs), return_exceptions=True
-        )
+        tasks = [asyncio.create_task(self._guarded(s, query, per)) for s in self._subs]
+        # Return on the budget with whatever finished; cancel the stragglers (no waiting on the slowest).
+        done, pending = await asyncio.wait(tasks, timeout=_SEARCH_BUDGET_S)
+        for t in pending:
+            t.cancel()
         best: dict[str, SearchHit] = {}
-        for r in results:
-            if not isinstance(r, list):
-                continue  # an upstream errored — already isolated, skip it
+        for t in done:
+            try:
+                r = t.result()
+            except Exception:  # noqa: BLE001 — an upstream errored; already isolated, skip it
+                continue
             for h in r:
                 if not h.url:
                     continue
@@ -110,6 +130,8 @@ class MultiProvider:
         )
 
     async def fetch(self, url: str) -> str:
+        # Priority chain (Jina → Firecrawl → Tavily → Apify): first reader to return text wins. Each
+        # reader carries its own timeout, so the chain is bounded even if an early one is slow.
         for reader in self._readers:
             text = await reader.read(url)
             if text:
