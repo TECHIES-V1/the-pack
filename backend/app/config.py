@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     search_provider: str = "tavily"
     search_api_key: str = ""  # Tavily (the primary web-search vendor)
     search_max_results: int = 8
+    search_cache_ttl_s: float = 3600.0  # reuse identical searches/URL reads within the window
 
     # Multi-source research — every provider with a key present joins the fan-out; keyless ones
     # (Hacker News, Wikidata, DBpedia, OpenAlex) always run. ALL empty → canned offline provider.

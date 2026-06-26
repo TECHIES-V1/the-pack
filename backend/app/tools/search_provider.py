@@ -20,6 +20,7 @@ import time
 from typing import Protocol
 
 from app.config import settings
+from app.tools.cache import TTLCache
 from app.tools.providers.academic import CoreSearch, OpenAlexSearch
 from app.tools.providers.base import Reader, SearchHit, SearchResults, SubProvider
 from app.tools.providers.community import GitHubSearch, HackerNewsSearch
@@ -99,13 +100,16 @@ class MultiProvider:
     def __init__(self, subs: list[SubProvider], readers: list[Reader]) -> None:
         self._subs = subs
         self._readers = readers
+        # Per-instance so the singleton caches across scouts + hunts in-process, while tests that
+        # build their own MultiProvider stay isolated. Single-flight collapses concurrent dups.
+        self._search_cache: TTLCache[list[SearchHit]] = TTLCache(settings.search_cache_ttl_s)
+        self._fetch_cache: TTLCache[str] = TTLCache(settings.search_cache_ttl_s)
 
     async def _guarded(self, sub: SubProvider, query: str, per: int) -> list[SearchHit]:
         async with _sem(sub.name):
             return await sub.search(query, max_results=per)
 
-    async def search(self, query: str, *, max_results: int = 8) -> SearchResults:
-        start = time.monotonic()
+    async def _fan_out(self, query: str, max_results: int) -> list[SearchHit]:
         per = max(3, max_results // 2)
         tasks = [asyncio.create_task(self._guarded(s, query, per)) for s in self._subs]
         # Budget the fan-out: keep what finished, cancel stragglers, never wait on the slowest.
@@ -124,12 +128,19 @@ class MultiProvider:
                 cur = best.get(h.url)
                 if cur is None or h.score > cur.score:
                     best[h.url] = h
-        merged = sorted(best.values(), key=lambda h: h.score, reverse=True)[:max_results]
+        return sorted(best.values(), key=lambda h: h.score, reverse=True)[:max_results]
+
+    async def search(self, query: str, *, max_results: int = 8) -> SearchResults:
+        start = time.monotonic()
+        key = f"{max_results}:{query.strip().lower()}"
+        hits = await self._search_cache.get_or_compute(
+            key, lambda: self._fan_out(query, max_results)
+        )
         return SearchResults(
-            query=query, hits=merged, latency_ms=int((time.monotonic() - start) * 1000)
+            query=query, hits=hits, latency_ms=int((time.monotonic() - start) * 1000)
         )
 
-    async def fetch(self, url: str) -> str:
+    async def _read_chain(self, url: str) -> str:
         # Priority chain (Jina → Firecrawl → Tavily → Apify): first reader to return text wins. Each
         # reader carries its own timeout, so the chain is bounded even if an early one is slow.
         for reader in self._readers:
@@ -137,6 +148,9 @@ class MultiProvider:
             if text:
                 return text
         return ""
+
+    async def fetch(self, url: str) -> str:
+        return await self._fetch_cache.get_or_compute(url, lambda: self._read_chain(url))
 
 
 def make_search_provider() -> SearchProvider:
