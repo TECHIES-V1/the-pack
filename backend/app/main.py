@@ -38,6 +38,7 @@ from app.engine.core import Emitter
 from app.engine.ids import new_hunt_id, new_instinct_id, new_project_id
 from app.engine.benchmark import run_benchmark
 from app.engine.registry import HuntRegistry
+from app.engine.rehearse import rehearse
 from app.engine.relay import OutboxRelay
 from app.engine.strategies import strategy_catalog
 from app.engine.supervisor import Supervisor
@@ -543,6 +544,20 @@ async def approve_plan(hunt_id: str, body: ApprovePlan, request: Request) -> JSO
     if not ok:
         return JSONResponse(status_code=404, content={"detail": "hunt not running here"})
     return _accepted({"hunt_id": hunt_id, "accepted": True})
+
+
+class RehearseBody(BaseModel):
+    team: list[dict] | None = None
+    strategy: str | None = None
+
+
+@app.post("/hunts/{hunt_id}/rehearse", tags=["hunts"])
+async def rehearse_hunt(hunt_id: str, body: RehearseBody) -> dict:
+    """Shadow Hunt (safety rail): estimate this team's cost + time before the pack runs. No spend,
+    no events — a pure rehearsal the Plan shows so the Packmaster sees the cost first."""
+    strategy = body.strategy or settings.default_strategy
+    team = body.team or [{"role": "scout", "count": 3}]
+    return rehearse(team, strategy)
 
 
 @app.post("/hunts/intake", tags=["hunts"])
