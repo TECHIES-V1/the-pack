@@ -8,11 +8,42 @@ a body, nothing upstream changes.
 
 from __future__ import annotations
 
+import asyncio
 import csv as _csv
 import io
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 
 MAX_CHARS = 20_000
+
+
+async def assert_public_url(url: str) -> None:
+    """SSRF guard for server-side fetches (the user-supplied /parse?url=): allow only http/https,
+    and reject any URL whose host resolves to a private / loopback / link-local / reserved address
+    (e.g. localhost, 10.x, 169.254.169.254 cloud-metadata)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("only http/https URLs are allowed")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("missing host")
+    try:
+        infos = await asyncio.get_event_loop().getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"could not resolve host: {exc}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("URL resolves to a non-public address")
 
 
 def detect_kind(filename: str, content_type: str = "") -> str:
@@ -77,6 +108,7 @@ async def parse_url(url: str) -> str:
     """Fetch a URL and return readable text (markup stripped). Requires network."""
     import httpx
 
+    await assert_public_url(url)
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         resp = await client.get(url, headers={"User-Agent": "PackBot/1.0"})
         resp.raise_for_status()

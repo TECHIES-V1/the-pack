@@ -50,8 +50,25 @@ class Settings(BaseSettings):
     # Web search (real research). An empty key falls back to the deterministic canned
     # provider, so the whole engine still runs offline end to end (Doc 04 §07).
     search_provider: str = "tavily"
-    search_api_key: str = ""
-    search_max_results: int = 5
+    search_api_key: str = ""  # Tavily (the primary web-search vendor)
+    search_max_results: int = 8
+    search_cache_ttl_s: float = 3600.0  # reuse identical searches/URL reads within the window
+
+    # Multi-source research — every provider with a key present joins the fan-out; keyless ones
+    # (Hacker News, Wikidata, DBpedia, OpenAlex) always run. ALL empty → canned offline provider.
+    exa_api_key: str = ""
+    serpapi_api_key: str = ""
+    youcom_api_key: str = ""
+    newsapi_key: str = ""
+    gnews_api_key: str = ""
+    newsdata_api_key: str = ""
+    jina_api_key: str = ""
+    firecrawl_api_key: str = ""
+    apify_api_key: str = ""
+    core_api_key: str = ""
+    github_token: str = ""
+    google_kg_api_key: str = ""
+    openalex_mailto: str = ""
 
     # Research strategy — the selectable engine modes. ORTHOGONAL to the autonomy `mode`
     # (wild | on_signal | on_command): strategy shapes the plan, mode shapes execution.

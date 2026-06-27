@@ -39,6 +39,8 @@ export class StreamClient {
 
   connect(): void {
     this.closedByUs = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer); // don't orphan a pending reconnect
+    this.reconnectTimer = null;
     this.open();
   }
 

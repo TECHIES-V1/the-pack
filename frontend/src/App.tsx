@@ -18,6 +18,8 @@ import { StatesGallery } from "@/pages/StatesGallery";
 import { ShareView } from "@/pages/ShareView";
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { HuntCompleteToast } from "@/components/ui/HuntCompleteToast";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
 import { useUiStore } from "@/store/uiStore";
@@ -49,6 +51,8 @@ const TERMINAL = new Set(["returned", "failed", "stopped_by_user"]);
 
 export default function App() {
   const [route, setRoute] = useState<Route>(parseRoute);
+  const [streamStatus, setStreamStatus] = useState<"connecting" | "open" | "closed">("open");
+  const huntState = useHuntStore((s) => s.view.state);
   const { setDenOpen, setSettingsOpen, settingsOpen } = useUiStore();
 
   useEffect(() => {
@@ -98,6 +102,7 @@ export default function App() {
         }
       },
       getResumeSeq: () => useHuntStore.getState().view.lastSeq,
+      onStatus: setStreamStatus,
     });
     client.connect();
     clientRef.current = client;
@@ -112,11 +117,16 @@ export default function App() {
   else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
   else page = <StatesGallery />;
 
+  // Show the connection badge only on a live hunt that hasn't reached a terminal state — a closed
+  // stream after the hunt is done is expected, not a failure.
+  const showBadge = route.view === "hunt" && !TERMINAL.has(huntState);
+
   return (
     <MotionConfig reducedMotion="user">
-      {page}
+      <ErrorBoundary>{page}</ErrorBoundary>
       {settingsOpen && <SettingsModal />}
       <HuntCompleteToast />
+      {showBadge && <ConnectionBadge status={streamStatus} />}
     </MotionConfig>
   );
 }

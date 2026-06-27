@@ -225,6 +225,17 @@ class Repo:
         val = await self._pool.fetchval("SELECT MAX(seq) FROM events WHERE hunt_id = $1", hunt_id)
         return -1 if val is None else int(val)
 
+    async def list_unfinished_hunts(self) -> list[dict[str, Any]]:
+        """Hunts in a non-terminal state — used on startup to reconcile any orphaned by a prior stop
+        (their in-memory Supervisor is gone)."""
+        rows = await self._pool.fetch(
+            """
+            SELECT hunt_id, state FROM hunts
+            WHERE state NOT IN ('returned', 'failed', 'stopped_by_user')
+            """
+        )
+        return [{"hunt_id": r["hunt_id"], "state": r["state"]} for r in rows]
+
     async def append_event(self, event: Event) -> None:
         """Insert the event and notify the relay, atomically.
 

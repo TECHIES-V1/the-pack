@@ -9,14 +9,20 @@ import asyncio
 import pytest
 import pytest_asyncio
 
+import app.tools.web as web
 from app.db.pool import apply_schema, create_pool
+from app.tools.search_provider import CannedProvider
 
 
 @pytest.fixture(autouse=True)
 def _force_offline(monkeypatch):
-    """Tests are hermetic: pin the model brain to the offline FakeQwen regardless of whether a
-    real QWEN_API_KEY happens to sit in the developer's .env."""
+    """Tests are hermetic: pin the model brain to the offline FakeQwen AND force the deterministic
+    canned search provider, regardless of whatever real keys sit in the developer's .env (the web
+    tools bind a live MultiProvider at import once keys are present)."""
     monkeypatch.setattr("app.config.settings.qwen_api_key", "", raising=False)
+    canned = CannedProvider()
+    monkeypatch.setattr(web.WEB_SEARCH, "_provider", canned, raising=False)
+    monkeypatch.setattr(web.WEB_FETCH, "_provider", canned, raising=False)
 
 
 @pytest_asyncio.fixture

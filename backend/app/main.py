@@ -33,6 +33,7 @@ from app.bus.redis_stream import EventBus
 from app.config import settings
 from app.db.pool import apply_schema, create_pool
 from app.db.repo import Repo
+from app.events.models import Event
 from app.engine.core import Emitter
 from app.engine.ids import new_hunt_id, new_instinct_id, new_project_id
 from app.engine.benchmark import run_benchmark
@@ -47,6 +48,36 @@ from app.qwen.client import QwenClient
 from app.qwen.types import CallSpec
 
 
+_RESTART_REASON = "The engine restarted before this hunt could finish — start a new one."
+
+
+async def _recover_stranded_hunts(repo: Repo) -> None:
+    """A previous engine stop leaves in-flight hunts with no Supervisor (state lived in-process). On
+    startup, close each with a terminal `hunt_failed` event so the canvas unfreezes and the Den
+    shows an honest 'couldn't finish' instead of a hunt stuck forever. Best-effort — never blocks
+    startup; a bad row is skipped. (Full cross-restart resume is a v2 item.)"""
+    try:
+        stranded = await repo.list_unfinished_hunts()
+    except Exception:  # noqa: BLE001 — recovery is best-effort; don't hold up serving
+        return
+    for h in stranded:
+        hid = h["hunt_id"]
+        try:
+            seq = (await repo.get_last_seq(hid)) + 1
+            await repo.append_event(
+                Event(
+                    hunt_id=hid,
+                    seq=seq,
+                    type="hunt_failed",
+                    actor="engine",
+                    payload={"reason": "engine_restarted", "reason_plain_english": _RESTART_REASON},
+                )
+            )
+            await repo.set_hunt_state(hid, "failed")
+        except Exception:  # noqa: BLE001 — skip a bad hunt, keep reconciling the rest
+            continue
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool = await create_pool()
@@ -56,6 +87,7 @@ async def lifespan(app: FastAPI):
     registry = HuntRegistry()
     relay = OutboxRelay(pool, bus, repo)
     await relay.start()
+    await _recover_stranded_hunts(repo)
 
     app.state.pool = pool
     app.state.bus = bus
