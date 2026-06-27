@@ -123,3 +123,49 @@ describe("reducer narration (the chat feed)", () => {
     expect(feedTexts([ev("tool_called", { wolf_id: "scout-1", tool: "web_search", args_summary: "x" }, 1)])).toHaveLength(0);
   });
 });
+
+describe("reducer v2 — team, clones, the Doctor", () => {
+  it("carries the team + edges on plan_proposed", () => {
+    const s = reduceAll([
+      ev("plan_proposed", {
+        steps: [], wolves: [], pattern: "hierarchical", est_cost: 0.1, est_time: 10,
+        team: [{ role: "scout", count: 2 }], edges: [["beta", "scout"]],
+      }, 1),
+    ]);
+    expect(s.plan?.team).toEqual([{ role: "scout", count: 2 }]);
+    expect(s.plan?.edges).toEqual([["beta", "scout"]]);
+  });
+
+  it("sets clone lineage + per-wolf budget on wolf_spawned", () => {
+    const s = reduceAll([
+      ev("wolf_spawned", {
+        wolf_id: "scout-2", role: "scout", model_tier: "flash", thinking: false,
+        prompt_version: "v1", budget_usd: 0.1, parent_wolf_id: "scout-1",
+      }, 1),
+    ]);
+    expect(s.wolves["scout-2"].parentId).toBe("scout-1");
+    expect(s.wolves["scout-2"].budgetUsd).toBe(0.1);
+  });
+
+  it("the Doctor heals: dispatched marks the target, healed clears it", () => {
+    let s = reduceAll([
+      ev("wolf_spawned", { wolf_id: "doctor", role: "doctor", model_tier: "flash", thinking: false, prompt_version: "v1" }, 1),
+      ev("doctor_dispatched", { doctor_id: "doctor", target_wolf_id: "scout-1", reason: "timeout" }, 2),
+    ]);
+    expect(s.wolves["doctor"].healing).toBe("scout-1");
+    expect(s.wolves["doctor"].status).toBe("hunting");
+
+    s = reduce(s, ev("doctor_healed", { doctor_id: "doctor", target_wolf_id: "scout-1", note_plain_english: "patched it" }, 3));
+    expect(s.wolves["doctor"].healing).toBeUndefined();
+    expect(s.wolves["doctor"].status).toBe("done");
+    expect(s.feed.some((f) => f.text === "patched it")).toBe(true);
+  });
+
+  it("v1 back-compat: a plan_proposed with no team leaves team undefined but still renders wolves", () => {
+    const s = reduceAll([
+      ev("plan_proposed", { steps: [], wolves: ["scout-1", "tracker"], pattern: "hierarchical", est_cost: 0.1, est_time: 10 }, 1),
+    ]);
+    expect(s.plan?.team).toBeUndefined();
+    expect(s.plan?.wolves).toContain("scout-1");
+  });
+});
