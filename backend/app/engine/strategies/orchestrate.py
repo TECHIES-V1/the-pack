@@ -33,6 +33,10 @@ class OrchestrateStrategy(Strategy):
 
         merged = await engine.merge(findings)
 
+        # Sentinel verifies every claim carries a real source before we draft — a real check that
+        # also wakes the Sentinel node on the canvas (the default strategy used to skip it).
+        await engine.critique(merged)
+
         decision = None
         if merged.conflict:
             decision = await engine.resolve_conflict(merged.conflict)

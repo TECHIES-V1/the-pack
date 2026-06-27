@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 
 from app.db.repo import Repo
 from app.engine.boundary import Boundary, Verdict
 from app.engine.core import Emitter
 from app.engine.ids import new_artifact_id, new_checkpoint_id, new_hold_id, new_standoff_id
-from app.engine.stray import StrayDetector
 from app.engine.strategies import Conflict, CritiqueResult, Finding, Merged, get_strategy
 from app.engine.strategies.base import (
     CRITIQUE_SCHEMA,
@@ -41,6 +41,7 @@ from app.engine.strategies.base import (
     MERGE_SCHEMA,
     PLAN_SCHEMA,
 )
+from app.engine.stray import StrayDetector
 from app.engine.wolves import Wolf
 from app.prompts import load_prompt
 from app.qwen import pricing
@@ -63,13 +64,36 @@ _ROSTER: list[tuple[str, str, str, bool]] = [
 
 SCOUT_IDS: list[str] = ["scout-1", "scout-2", "scout-3"]
 
+# Search APIs (Tavily/Exa/Serp/…) take natural language, not Google dorks — a query like
+# "site:spacex.com OR site:nsf.org past week" returns nothing because the operators are read as
+# literal text. Degrade any dork to plain keywords so the fan-out actually finds sources; recency is
+# the engines' job, not a phrase in the query.
+_DORK_RE = re.compile(
+    r"""(?ix)
+      \b(?:site|filetype|intitle|inurl|intext)\s*:\s*\S+   # site:foo.com, filetype:pdf, …
+    | \b(?:OR|AND)\b                                        # boolean operators
+    | \b(?:past|last)\s+(?:\d+\s+)?(?:day|week|month|year)s?\b   # recency phrases
+    | ["']                                                  # stray quotes
+    """,
+)
+
+
+def _plain_query(query: str) -> str:
+    """Strip search operators and recency phrases down to plain keywords. Falls back to the original
+    if stripping empties it (better a dork than nothing)."""
+    cleaned = _DORK_RE.sub(" ", query)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -|")
+    return cleaned or query.strip()
+
 # What each dispatch asks its wolf to do. The role's prompt file is the system message; this is
 # the task-specific instruction appended to the user message.
 _INTENT_INSTRUCTIONS: dict[str, str] = {
     "plan": (
         "Break this into a parallel research plan. Respond with ONLY JSON: a one-line `summary`, "
         "a `queries` array with one focused web-search query per scout (three), an `assumptions` "
-        "array, and numeric `est_cost` (USD) and `est_time` (seconds)."
+        "array, and numeric `est_cost` (USD) and `est_time` (seconds). Each query must be plain "
+        "natural-language keywords — NO operators (no site:, OR/AND, quotes, 'past week'); the "
+        "search engine handles recency itself."
     ),
     "search": (
         "Using ONLY the search results provided, summarize the key findings for your angle. "
@@ -167,6 +191,7 @@ class Supervisor:
             await self._approve(approve)
 
             await self._spawn_roster()
+            await self._open_pack()
             await self._strategy.execute(self)
         except StopHunt:
             with contextlib.suppress(Exception):
@@ -335,6 +360,32 @@ class Supervisor:
                 },
             )
 
+    async def _open_pack(self) -> None:
+        """Wake the pack's leadership on the canvas at kickoff. Alpha takes the lead and stays active
+        until finish; Beta hands the approved plan to the pack (its planning is already done). Both
+        emit real lifecycle events so their nodes light up and the edges leaving them flow — without
+        this, Alpha/Beta sit dormant the whole hunt and their edges never animate."""
+        await self._emit(
+            "step_started",
+            "alpha",
+            {"step_id": "s0-lead", "wolf_id": "alpha", "summary": "Leading the hunt"},
+        )
+        await self._emit(
+            "step_started",
+            "beta",
+            {"step_id": "s0-brief", "wolf_id": "beta", "summary": "Briefed the pack on the plan"},
+        )
+        await self._emit(
+            "step_completed",
+            "beta",
+            {
+                "step_id": "s0-brief",
+                "wolf_id": "beta",
+                "output_ref": f"art_{self._hunt_id}_plan",
+                "confidence": 0.9,
+            },
+        )
+
     # --- Engine surface (the primitives strategies orchestrate) ------------------------
 
     @property
@@ -363,6 +414,8 @@ class Supervisor:
         if wolf is None:
             return Finding(wolf_id=wolf_id, summary="", sources=[], confidence=0.0)
 
+        # Plain keywords reach the APIs — covers Beta's plan and the user's edited angles.
+        query = _plain_query(query)
         await self._emit(
             "step_started", wolf_id, {"step_id": step_id, "wolf_id": wolf_id, "summary": f"Searching: {query}"}
         )
@@ -653,6 +706,17 @@ class Supervisor:
             "sources": len(sources),
             "wolves": len(self._wolves),
         }
+        # Alpha closes out — its node settles to done (green) instead of glowing forever.
+        await self._emit(
+            "step_completed",
+            "alpha",
+            {
+                "step_id": "s0-lead",
+                "wolf_id": "alpha",
+                "output_ref": artifact_id,
+                "confidence": 0.95,
+            },
+        )
         await self._emit("hunt_completed", "engine", {"final_artifact_id": artifact_id, "totals": totals})
         await self._repo.set_hunt_state(self._hunt_id, "returned")
 
