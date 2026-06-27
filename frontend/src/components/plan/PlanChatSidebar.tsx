@@ -12,10 +12,11 @@ import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { MessageActions } from "@/components/chat/MessageActions";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { OneBox } from "@/components/composer/OneBox";
-import { api, streamSSE, ApiError, type IntakeTurn } from "@/net/api";
+import { api, streamSSE, ApiError, type IntakeTurn, type CreateHuntBody } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
 import { useUiStore } from "@/store/uiStore";
+import { useFormationStore } from "@/store/formationStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
@@ -175,13 +176,36 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
     setAskError(null);
     setBusy(true);
     try {
-      const edits = editedQueries
-        ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
-        : undefined;
-      await api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
+      const stagedTeam = useFormationStore.getState().team;
+      const edits: Record<string, unknown> = {};
+      if (editedQueries) edits.queries = editedQueries.map((s) => s.trim()).filter(Boolean);
+      if (stagedTeam) edits.team = stagedTeam; // the reshaped formation (Edit Panel)
+      await api.approvePlan(huntId, {
+        mode,
+        boundary_usd: boundary,
+        edits: Object.keys(edits).length ? edits : undefined,
+      });
     } catch (err) {
       setAskError(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  // Retry a failed hunt: re-create it with the same task + strategy and land back on the Plan.
+  async function retry() {
+    setBusy(true);
+    try {
+      const { hunt_id } = await api.createHunt({
+        input: task,
+        source: "typed",
+        strategy: view.plan?.strategy as CreateHuntBody["strategy"],
+      });
+      useChatStore.getState().reset();
+      useFormationStore.getState().reset();
+      window.history.pushState({}, "", `/hunt/${hunt_id}/plan`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch {
       setBusy(false);
     }
   }
@@ -399,6 +423,16 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
             className="self-start ml-[30px] rounded-lg bg-white text-black px-3 py-1.5 text-[13px] font-medium cursor-pointer border-none hover:bg-white/90"
           >
             Open brief →
+          </button>
+        )}
+
+        {view.state === "failed" && (
+          <button
+            onClick={retry}
+            disabled={busy}
+            className="self-start ml-[30px] rounded-lg border border-[#2a2a2a] text-[#d4d4d8] hover:text-white px-3 py-1.5 text-[13px] cursor-pointer bg-transparent disabled:opacity-60"
+          >
+            Try again
           </button>
         )}
       </div>

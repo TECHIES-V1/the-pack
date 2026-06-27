@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { LuPanelRight, LuArrowLeft } from "react-icons/lu";
+import { FormationEditPanel } from "@/components/plan/FormationEditPanel";
 import type { PlanView } from "@/events/reducer";
 
 const STRATEGY_LABEL: Record<string, string> = {
@@ -25,9 +26,11 @@ interface Props {
   plan: PlanView;
   onApprove: () => void;
   onBack: () => void;
+  huntId?: string;
+  editable?: boolean; // true at plan_ready — show the Formation Edit Panel
 }
 
-export function PlanSidebar({ onBack, plan }: Props) {
+export function PlanSidebar({ onBack, plan, huntId, editable }: Props) {
   const [open, setOpen] = useState(true);
   const steps = plan?.steps ?? [];
 
@@ -112,6 +115,10 @@ export function PlanSidebar({ onBack, plan }: Props) {
             ))}
           </div>
         )}
+
+        {editable && huntId && plan?.team?.length ? (
+          <FormationEditPanel huntId={huntId} plan={plan} />
+        ) : null}
       </div>
     </aside>
   );

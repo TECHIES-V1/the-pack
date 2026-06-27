@@ -129,6 +129,13 @@ export interface ApprovePlanBody {
   boundary_usd: number;
   edits?: Record<string, unknown>;
 }
+export interface RehearseResult {
+  est_cost_usd: number;
+  est_time_s: number;
+  calls: number;
+  scouts: number;
+  warnings: string[];
+}
 export interface ResolveHoldBody {
   resolution: string;
   edited_text?: string | null;
@@ -227,6 +234,9 @@ export const api = {
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
   approvePlan: (id: string, body: ApprovePlanBody) =>
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
+  // Shadow Hunt: estimate a team's cost/time before launching (v2). No spend, no events.
+  rehearse: (id: string, team: unknown[], strategy?: string) =>
+    post<RehearseResult>(`/hunts/${id}/rehearse`, { team, strategy }),
   resolveHold: (id: string, holdId: string, body: ResolveHoldBody) =>
     post<CommandAccepted>(`/hunts/${id}/holds/${holdId}/resolve`, body),
   // Multi-turn: pass the conversation so far so Alpha remembers the thread.

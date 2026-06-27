@@ -85,8 +85,7 @@ function styleFor(state: EdgeState, color: string): CSSProperties {
   return { stroke: "var(--territory-edge)", strokeWidth: 1.5, strokeDasharray: "3 5" };
 }
 
-function buildGraph(view: HuntView): { nodes: Node[]; edges: Edge[] } {
-  const wolves = displayWolves(view);
+export function buildGraph(wolves: WolfView[]): { nodes: Node[]; edges: Edge[] } {
   const byRole = (role: string) => wolves.filter((w) => w.role === role);
   const first = (role: string) => byRole(role)[0];
 
@@ -165,7 +164,7 @@ function buildGraph(view: HuntView): { nodes: Node[]; edges: Edge[] } {
 }
 
 export function Territory({ view }: { view: HuntView }) {
-  const { nodes, edges } = useMemo(() => buildGraph(view), [view]);
+  const { nodes, edges } = useMemo(() => buildGraph(displayWolves(view)), [view]);
 
   return (
     <ReactFlowProvider>

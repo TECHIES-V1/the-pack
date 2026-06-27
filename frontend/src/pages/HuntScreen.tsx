@@ -110,7 +110,13 @@ export function HuntScreen() {
 
       <div className="flex-1 min-h-0 flex">
         {/* Left: the pack roster — the full territory stays intact, even behind the reward */}
-        <PlanSidebar plan={(view.plan ?? {}) as PlanView} onApprove={() => {}} onBack={() => goTo("/?den=open")} />
+        <PlanSidebar
+          plan={(view.plan ?? {}) as PlanView}
+          onApprove={() => {}}
+          onBack={() => goTo("/?den=open")}
+          huntId={huntId}
+          editable={view.state === "plan_ready"}
+        />
 
         {/* Center: the Territory, always mounted. On the Return the brief pops up over it. */}
         <div className="relative flex-1 m-2 rounded-[12px] overflow-hidden border border-[#2a2a2a] bg-[#0F0F0F]">
