@@ -49,20 +49,81 @@ from app.qwen.client import OnDelta, QwenClient
 from app.qwen.types import CompletionResult
 from app.tools.web import WEB_FETCH, WEB_SEARCH
 
-# The roster. Tiers/thinking are explicit (the canonical fixture values) rather than parsed
-# from prompt frontmatter, which carries prose like "plus / max".
-_ROSTER: list[tuple[str, str, str, bool]] = [
-    ("alpha", "alpha", "max", True),
-    ("beta", "beta", "plus", True),
-    ("scout-1", "scout", "flash", False),
-    ("scout-2", "scout", "flash", False),
-    ("scout-3", "scout", "flash", False),
-    ("tracker", "tracker", "plus", True),
-    ("sentinel", "sentinel", "max", True),
-    ("howler", "howler", "plus", False),
-]
+# v2: Alpha builds the team per task. Each role's tier/thinking/default per-wolf budget cap is fixed
+# here (parsing prose from the prompt frontmatter is unreliable); Beta proposes only the SHAPE — how
+# many scouts, mainly. Alpha + Beta lead every hunt; the support roles always join; scouts vary.
+_ROLE_SPEC: dict[str, tuple[str, bool, float]] = {
+    # role:    (model_tier, thinking, default per-wolf budget cap USD)
+    "alpha": ("max", True, 0.15),
+    "beta": ("plus", True, 0.10),
+    "scout": ("flash", False, 0.10),
+    "tracker": ("plus", True, 0.15),
+    "sentinel": ("max", True, 0.20),
+    "howler": ("plus", False, 0.15),
+    "elder": ("flash", False, 0.05),  # v2 memory agent — wired in Phase 2.6
+}
 
-SCOUT_IDS: list[str] = ["scout-1", "scout-2", "scout-3"]
+# Canvas order: leads → the variable scouts → support. (Elder joins in 2.6 once it has a prompt.)
+_LEAD_ROLES = ["alpha", "beta"]
+_SUPPORT_ROLES = ["tracker", "sentinel", "howler"]
+_DEFAULT_SCOUTS = 3
+_MIN_SCOUTS = 1
+_MAX_SCOUTS = 5
+
+
+def _wolf_ids(role: str, count: int) -> list[str]:
+    """Mint ids for a role. Scouts are always suffixed (scout-1..N, the canonical convention); a
+    singleton of any other role keeps its bare role name; clones get -1..-N."""
+    if role == "scout":
+        return [f"scout-{i + 1}" for i in range(max(1, count))]
+    if count <= 1:
+        return [role]
+    return [f"{role}-{i + 1}" for i in range(count)]
+
+
+def _build_team(parsed: dict) -> list[dict]:
+    """Beta proposes the SHAPE (mainly scout count); expand to the canonical team — each role's
+    tier/thinking/budget filled from _ROLE_SPEC. Alpha + Beta always lead (×1); scouts vary 1..5;
+    support roles default to 1 but honor a higher requested count (a cloned tracker, 1..3)."""
+    proposed = {
+        str(e.get("role")): int(e.get("count") or 0)
+        for e in (parsed.get("team") or [])
+        if isinstance(e, dict)
+    }
+    team: list[dict] = []
+    for role in [*_LEAD_ROLES, "scout", *_SUPPORT_ROLES]:
+        tier, thinking, budget = _ROLE_SPEC[role]
+        if role in _LEAD_ROLES:
+            count = 1
+        elif role == "scout":
+            want = proposed.get("scout", _DEFAULT_SCOUTS) or _DEFAULT_SCOUTS
+            count = max(_MIN_SCOUTS, min(_MAX_SCOUTS, want))
+        else:
+            count = max(1, min(3, proposed.get(role, 1) or 1))
+        team.append({
+            "role": role,
+            "count": count,
+            "tier": tier,
+            "thinking": thinking,
+            "budget_usd": round(budget, 4),
+        })
+    return team
+
+
+def _roster_from_team(team: list[dict]) -> list[tuple[str, str, str, bool, float]]:
+    """Flatten the team spec into (wolf_id, role, tier, thinking, budget_usd) rows to spawn."""
+    rows: list[tuple[str, str, str, bool, float]] = []
+    for entry in team:
+        role = str(entry.get("role"))
+        if role not in _ROLE_SPEC:
+            continue
+        count = max(1, int(entry.get("count") or 1))
+        tier = str(entry.get("tier") or _ROLE_SPEC[role][0])
+        thinking = bool(entry.get("thinking", _ROLE_SPEC[role][1]))
+        budget = float(entry.get("budget_usd") or _ROLE_SPEC[role][2])
+        for wid in _wolf_ids(role, count):
+            rows.append((wid, role, tier, thinking, budget))
+    return rows
 
 # Search APIs (Tavily/Exa/Serp/…) take natural language, not Google dorks — a query like
 # "site:spacex.com OR site:nsf.org past week" returns nothing because the operators are read as
@@ -89,11 +150,12 @@ def _plain_query(query: str) -> str:
 # the task-specific instruction appended to the user message.
 _INTENT_INSTRUCTIONS: dict[str, str] = {
     "plan": (
-        "Break this into a parallel research plan. Respond with ONLY JSON: a one-line `summary`, "
-        "a `queries` array with one focused web-search query per scout (three), an `assumptions` "
-        "array, and numeric `est_cost` (USD) and `est_time` (seconds). Each query must be plain "
-        "natural-language keywords — NO operators (no site:, OR/AND, quotes, 'past week'); the "
-        "search engine handles recency itself."
+        "Break this into a research plan and size the pack to the task. Respond with ONLY JSON: a "
+        "one-line `summary`; a `team` array of {role, count} — pick 1-5 `scout`s (more for a broad "
+        "topic, fewer for a narrow one); a `queries` array with ONE plain-keyword search query per "
+        "scout (match the scout count); an `assumptions` array; and numeric `est_cost` (USD) and "
+        "`est_time` (seconds). Queries: plain keywords only — NO operators (site:, OR/AND, quotes, "
+        "'past week'); the engine handles recency."
     ),
     "search": (
         "Using ONLY the search results provided, summarize the key findings for your angle. "
@@ -163,6 +225,8 @@ class Supervisor:
         self._raw_input = raw_input
         self._strategy = get_strategy(strategy)
         self._wolves: dict[str, Wolf] = {}
+        self._team: list[dict] = []  # v2: the per-task formation Beta proposes / the user edits
+        self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap (gated in _dispatch, 2.4)
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -234,39 +298,49 @@ class Supervisor:
         await self._emit("plan_proposed", "beta", self._plan)
         await self._repo.set_hunt_state(self._hunt_id, "plan_ready")
 
+    def _scout_count(self) -> int:
+        """How many scouts the team carries (pre-spawn — reads the spec, not live wolves)."""
+        n = next((int(e.get("count") or 0) for e in self._team if e.get("role") == "scout"), 0)
+        return n or _DEFAULT_SCOUTS
+
     def _normalize_plan(self, parsed: dict) -> dict:
-        """Coerce the model's plan into a schema-valid plan_proposed payload (and carry the
-        per-scout queries + strategy as additive fields the canvas can read)."""
+        """Coerce the model's plan into a schema-valid plan_proposed payload: build the per-task
+        TEAM, then derive the scout angles/steps/worker-roster from it (additive canvas fields)."""
         task = self._raw_input or "the topic"
-        queries = [str(q).strip() for q in (parsed.get("queries") or []) if str(q).strip()]
-        if not queries:
-            queries = [f"{task} — overview", f"{task} — key data", f"{task} — outlook"]
-        queries = queries[: len(SCOUT_IDS)]
-        while len(queries) < len(SCOUT_IDS):
+        self._team = _build_team(parsed)
+        scout_ids = _wolf_ids("scout", self._scout_count())
+        n = len(scout_ids)
+        queries = [str(q).strip() for q in (parsed.get("queries") or []) if str(q).strip()][:n]
+        while len(queries) < n:
             queries.append(f"{task} — angle {len(queries) + 1}")
         assumptions = [str(a).strip() for a in (parsed.get("assumptions") or []) if str(a).strip()]
         return {
             "steps": [
                 {
                     "step_id": "s1",
-                    "summary": f"Range on {len(SCOUT_IDS)} angles of {task}",
-                    "wolves": list(SCOUT_IDS),
+                    "summary": f"Range on {n} angles of {task}",
+                    "wolves": list(scout_ids),
                 },
                 {
                     "step_id": "s2",
                     "summary": "Cross-reference the findings and extract claims",
                     "wolves": ["tracker"],
                 },
-                {"step_id": "s3", "summary": "Draft the briefing with citations", "wolves": ["howler"]},
+                {
+                    "step_id": "s3",
+                    "summary": "Draft the briefing with citations",
+                    "wolves": ["howler"],
+                },
             ],
-            "wolves": [*SCOUT_IDS, "tracker", "sentinel", "howler"],
+            "wolves": [*scout_ids, "tracker", "sentinel", "howler"],
             "pattern": self._strategy.pattern,
             "assumptions": assumptions or [f"scope: {task}", "recent sources", "briefing format"],
             "est_cost": float(parsed.get("est_cost") or 0.6),
             "est_time": int(parsed.get("est_time") or 210),
-            # additive (schema allows extra payload fields): the canvas + Door read these.
+            # additive (schema allows extra fields): the canvas + Door + Edit Panel read these.
             "queries": queries,
             "strategy": self._strategy.name,
+            "team": self._team,
         }
 
     async def _approve(self, cmd: dict) -> None:
@@ -293,11 +367,20 @@ class Supervisor:
         if not isinstance(edits, dict) or not edits:
             return
         diff: dict = {}
+        # The user reshaped the formation in the Edit Panel — rebuild the canonical team from it.
+        raw_team = edits.get("team")
+        if isinstance(raw_team, list) and raw_team:
+            self._team = _build_team({"team": raw_team})
+            self._plan["team"] = self._team
+            workers = [*_wolf_ids("scout", self._scout_count()), "tracker", "sentinel", "howler"]
+            self._plan["wolves"] = workers
+            diff["team"] = self._team
         raw_queries = edits.get("queries")
         if isinstance(raw_queries, list):
-            qs = [str(q).strip() for q in raw_queries if str(q).strip()][: len(SCOUT_IDS)]
+            n = self._scout_count()
+            qs = [str(q).strip() for q in raw_queries if str(q).strip()][:n]
             if qs:
-                while len(qs) < len(SCOUT_IDS):
+                while len(qs) < n:
                     qs.append(f"{self.task} — angle {len(qs) + 1}")
                 self._plan["queries"] = qs
                 self._queries = list(qs)
@@ -346,8 +429,10 @@ class Supervisor:
             self._commands.put_nowait(c)
 
     async def _spawn_roster(self) -> None:
-        for wolf_id, role, tier, thinking in _ROSTER:
+        roster = _roster_from_team(self._team or _build_team({}))
+        for wolf_id, role, tier, thinking, budget in roster:
             self._wolves[wolf_id] = self._make_wolf(wolf_id, role, tier, thinking)
+            self._wolf_budget[wolf_id] = budget
             await self._emit(
                 "wolf_spawned",
                 "engine",
@@ -357,6 +442,8 @@ class Supervisor:
                     "model_tier": tier,
                     "thinking": thinking,
                     "prompt_version": load_prompt(role).version,
+                    "budget_usd": budget,
+                    "parent_wolf_id": None,
                 },
             )
 
@@ -397,7 +484,8 @@ class Supervisor:
         return self._plan
 
     def scout_ids(self) -> list[str]:
-        return [w for w in SCOUT_IDS if w in self._wolves]
+        # Live scouts in spawn order — N is whatever Alpha built / the user edited, not a fixed 3.
+        return [wid for wid, w in self._wolves.items() if w.role == "scout"]
 
     def queries(self) -> list[str]:
         return list(self._queries)

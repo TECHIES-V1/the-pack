@@ -76,6 +76,14 @@ PLAN_SCHEMA: dict = {
         "assumptions": {"type": "array", "items": {"type": "string"}},
         "est_cost": {"type": "number"},
         "est_time": {"type": "number"},
+        # v2: the team Alpha should build — Beta sizes the pack to the task (mainly the scout count).
+        "team": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"role": {"type": "string"}, "count": {"type": "integer"}},
+            },
+        },
     },
 }
 

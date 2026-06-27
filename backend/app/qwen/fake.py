@@ -47,6 +47,7 @@ def _offline_result(intent: str, task: str) -> tuple[str, dict | None]:
     if intent == "plan":
         parsed = {
             "summary": f"A parallel research plan on {task}: range on three angles, merge, draft.",
+            "team": [{"role": "scout", "count": 3}],
             "queries": [
                 f"{task} — overview and key players",
                 f"{task} — latest data and figures",
