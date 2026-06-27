@@ -17,9 +17,11 @@ class Settings(BaseSettings):
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_region: str = "ap-southeast-1"
 
-    # Model-tier registry (placeholders; confirm real names on day 1).
+    # Model-tier registry — pinned to what dashscope-intl serves, verified on a real key to accept
+    # enable_thinking + prompt-JSON (Phase 1). The intl region exposes a dated snapshot for `plus`
+    # but only floating aliases for `max`/`flash`, so those stay aliases. All are .env-overridable.
     qwen_model_max: str = "qwen-max"
-    qwen_model_plus: str = "qwen-plus"
+    qwen_model_plus: str = "qwen-plus-2025-12-01"
     qwen_model_flash: str = "qwen-flash"
     qwen_model_vision: str = "qwen-vl-max"  # multimodal — reads images (Qwen-VL)
 
