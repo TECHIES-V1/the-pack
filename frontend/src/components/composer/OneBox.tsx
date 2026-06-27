@@ -15,6 +15,7 @@ interface PackAction {
   label: string;
   onSend: () => void;
   active: boolean;
+  busy?: boolean;
 }
 
 interface OneBoxProps {
@@ -28,7 +29,8 @@ interface OneBoxProps {
   onRecordingChange?: (recording: boolean) => void;
   /** Hide the Signal/On Wild/On Command autonomy dropdown (it only matters at plan-approval). */
   hideMode?: boolean;
-  /** When set and the composer is empty, the submit button morphs into the pack launch action. */
+  /** When set and the composer is empty, the submit button IS the white "Send the pack" launch
+   * pill; the moment you type it becomes the send arrow (ask/tweak). One button, never two. */
   packAction?: PackAction;
 }
 
@@ -298,38 +300,33 @@ export function OneBox({ droppedFiles = [], prefill, placeholder = "What should 
             )}
           </button>
 
-          {/* Arrow submit — always present, for asking / tweaking the plan */}
-          <motion.button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            whileTap={canSubmit ? { scale: 0.92 } : {}}
-            className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit
-              ? "bg-white text-door-bg cursor-pointer"
-              : "bg-door-border text-door-dim cursor-default"
-              }`}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </motion.button>
-
-          {/* Launch — lives ON the chat box, persistent while the plan is ready (never hides on type) */}
-          <AnimatePresence initial={false}>
-            {packAction?.active && (
-              <motion.button
-                key="pack"
-                onClick={packAction.onSend}
-                whileTap={{ scale: 0.95 }}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.15 }}
-                className="bg-[#3fb27f] text-white rounded-xl px-3.5 py-2 text-[13px] font-medium cursor-pointer border-none shrink-0 whitespace-nowrap"
-              >
-                {packAction.label}
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* The submit button. When the plan is ready and the box is empty, it IS the white launch
+              pill ("Send the pack →"). The moment you type, it's the send arrow (ask/tweak the plan).
+              One button — never a second one, never green. */}
+          {packAction?.active && !canSubmit ? (
+            <motion.button
+              onClick={packAction.onSend}
+              disabled={packAction.busy}
+              whileTap={packAction.busy ? {} : { scale: 0.95 }}
+              className="bg-white text-door-bg rounded-full h-9 px-4 flex items-center text-[13px] font-medium border-none shrink-0 whitespace-nowrap transition-opacity duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-default"
+            >
+              {packAction.label}
+            </motion.button>
+          ) : (
+            <motion.button
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              whileTap={canSubmit ? { scale: 0.92 } : {}}
+              className={`w-9 h-9 rounded-full border-none flex items-center justify-center shrink-0 transition-colors duration-200 ${canSubmit
+                ? "bg-white text-door-bg cursor-pointer"
+                : "bg-door-border text-door-dim cursor-default"
+                }`}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M8 12V4M4 8l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </motion.button>
+          )}
         </div>
       </div>
     </div>
