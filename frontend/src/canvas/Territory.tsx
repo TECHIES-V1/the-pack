@@ -40,7 +40,7 @@ const ACTIVE = new Set(["hunting", "talking", "thinking"]);
 const ROLES: WolfRole[] = ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder"];
 const TIER_BY_ROLE: Record<WolfRole, "max" | "plus" | "flash"> = {
   alpha: "max", beta: "plus", scout: "flash", tracker: "plus",
-  howler: "plus", sentinel: "max", hunter: "flash", elder: "plus",
+  howler: "plus", sentinel: "max", hunter: "flash", elder: "plus", doctor: "plus",
 };
 
 function roleFromId(id: string): WolfRole {

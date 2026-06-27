@@ -24,6 +24,8 @@ export type EventType =
   | "standoff_resolved"
   | "stray_detected"
   | "stray_recovered"
+  | "doctor_dispatched"
+  | "doctor_healed"
   | "boundary_warning"
   | "boundary_downgrade"
   | "boundary_halt"
@@ -54,7 +56,8 @@ export type WolfRole =
   | "howler"
   | "sentinel"
   | "hunter"
-  | "elder";
+  | "elder"
+  | "doctor";
 
 // The Doc 03 §6 WolfNode state matrix.
 export type WolfStatus =

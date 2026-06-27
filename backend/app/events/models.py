@@ -41,6 +41,8 @@ EventType = Literal[
     "standoff_resolved",
     "stray_detected",
     "stray_recovered",
+    "doctor_dispatched",
+    "doctor_healed",
     "boundary_warning",
     "boundary_downgrade",
     "boundary_halt",

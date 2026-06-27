@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sendthepack.com/schema/events/v1.json",
   "title": "Pack Event Envelope v1",
-  "description": "FROZEN June 12, 2026. The single source of truth and the frontend-backend contract (Doc 04 §3). seq is strictly increasing per hunt; events are append-only and never edited. If it is not an event, it did not happen.",
+  "description": "FROZEN June 12, 2026; extended ADDITIVELY for v2 (new event types + new OPTIONAL payload fields only — never rename or remove). The single source of truth and the frontend-backend contract (Doc 04 §3). seq is strictly increasing per hunt; events are append-only and never edited. If it is not an event, it did not happen.",
   "type": "object",
   "required": ["event_id", "hunt_id", "seq", "ts", "type", "actor", "payload"],
   "properties": {
@@ -37,6 +37,8 @@
     { "if": { "properties": { "type": { "const": "standoff_resolved" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/standoff_resolved" } } } },
     { "if": { "properties": { "type": { "const": "stray_detected" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_detected" } } } },
     { "if": { "properties": { "type": { "const": "stray_recovered" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_recovered" } } } },
+    { "if": { "properties": { "type": { "const": "doctor_dispatched" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/doctor_dispatched" } } } },
+    { "if": { "properties": { "type": { "const": "doctor_healed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/doctor_healed" } } } },
     { "if": { "properties": { "type": { "const": "boundary_warning" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_warning" } } } },
     { "if": { "properties": { "type": { "const": "boundary_downgrade" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_downgrade" } } } },
     { "if": { "properties": { "type": { "const": "boundary_halt" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_halt" } } } },
@@ -57,6 +59,7 @@
         "hold_opened", "hold_resolved",
         "standoff_opened", "standoff_turn", "standoff_resolved",
         "stray_detected", "stray_recovered",
+        "doctor_dispatched", "doctor_healed",
         "boundary_warning", "boundary_downgrade", "boundary_halt",
         "artifact_created",
         "hunt_completed", "hunt_failed", "hunt_stopped",
@@ -112,7 +115,11 @@
           "pattern": { "enum": ["sequential", "hierarchical", "parallel_then_merge", "standoff"] },
           "assumptions": { "type": "array", "items": { "type": "string" } },
           "est_cost": { "type": "number" },
-          "est_time": { "type": "number" }
+          "est_time": { "type": "number" },
+          "queries": { "type": "array", "items": { "type": "string" }, "description": "Per-scout search angles (additive)." },
+          "strategy": { "type": "string", "description": "Selected research strategy (additive)." },
+          "team": { "type": "array", "description": "v2: the per-task team Alpha builds — [{role,count,tier,thinking,budget_usd}]." },
+          "edges": { "type": "array", "description": "v2: optional formation DAG edges [from_role, to_role]." }
         }
       },
       "plan_edited": {
@@ -133,10 +140,12 @@
         "required": ["wolf_id", "role", "model_tier", "thinking", "prompt_version"],
         "properties": {
           "wolf_id": { "type": "string" },
-          "role": { "enum": ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder"] },
+          "role": { "enum": ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder", "doctor"] },
           "model_tier": { "enum": ["max", "plus", "flash"] },
           "thinking": { "type": "boolean" },
-          "prompt_version": { "type": "string" }
+          "prompt_version": { "type": "string" },
+          "budget_usd": { "type": ["number", "null"], "description": "v2: this wolf's own spend cap (additive)." },
+          "parent_wolf_id": { "type": ["string", "null"], "description": "v2: set when this wolf is a clone (additive)." }
         }
       },
       "step_started": {
@@ -275,6 +284,27 @@
         "properties": {
           "wolf_id": { "type": "string" },
           "action": { "enum": ["reroute", "replan", "respawn"] },
+          "note_plain_english": { "type": "string" }
+        }
+      },
+      "doctor_dispatched": {
+        "type": "object",
+        "description": "v2: the Doctor heads to a faulted agent to heal it (can clone itself for several).",
+        "required": ["doctor_id", "target_wolf_id"],
+        "properties": {
+          "doctor_id": { "type": "string" },
+          "target_wolf_id": { "type": "string" },
+          "reason": { "type": ["string", "null"] }
+        }
+      },
+      "doctor_healed": {
+        "type": "object",
+        "description": "v2: the Doctor finished healing a faulted agent.",
+        "required": ["doctor_id", "target_wolf_id", "note_plain_english"],
+        "properties": {
+          "doctor_id": { "type": "string" },
+          "target_wolf_id": { "type": "string" },
+          "action": { "type": ["string", "null"] },
           "note_plain_english": { "type": "string" }
         }
       },

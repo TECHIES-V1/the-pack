@@ -10,7 +10,7 @@
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { CSSProperties, ReactNode } from "react";
-import { FaStar, FaExclamationTriangle } from "react-icons/fa";
+import { FaStar, FaExclamationTriangle, FaPlus } from "react-icons/fa";
 import { LuRoute, LuPen } from "react-icons/lu";
 import { BiSolidBarChartAlt2 } from "react-icons/bi";
 import { PiCrosshairBold, PiHexagonBold } from "react-icons/pi";
@@ -27,6 +27,7 @@ export const ROLE_COLOR: Record<WolfRole, string> = {
   sentinel: "#9ca3af",
   hunter: "#22d3ee",
   elder: "#9ca3af",
+  doctor: "#2dd4bf", // teal — reads as healing, distinct from beta's green
 };
 
 const ROLE_ICON: Record<WolfRole, ReactNode> = {
@@ -38,6 +39,7 @@ const ROLE_ICON: Record<WolfRole, ReactNode> = {
   sentinel: <FaExclamationTriangle />,
   hunter: <PiHexagonBold />,
   elder: <FaStar />,
+  doctor: <FaPlus />,
 };
 
 const STRAY = "#eb3424";
