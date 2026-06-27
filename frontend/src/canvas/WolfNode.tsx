@@ -88,6 +88,7 @@ export interface WolfNodeData {
   phase?: string;
   sources?: number;
   spendUsd?: number;
+  budgetUsd?: number; // v2: this wolf's own spend cap
   [key: string]: unknown;
 }
 
@@ -100,6 +101,7 @@ export function WolfCard({ data, selected = false }: { data: WolfNodeData; selec
   const active = ACTIVE.has(data.status);
   const sources = data.sources ?? 0;
   const spend = data.spendUsd ?? 0;
+  const budget = data.budgetUsd ?? 0;
 
   const circle: CSSProperties = {
     width: 52,
@@ -176,7 +178,7 @@ export function WolfCard({ data, selected = false }: { data: WolfNodeData; selec
       {sources > 0 || spend > 0 ? (
         <div style={{ display: "flex", gap: 8, fontSize: 9.5, color: "#71717a" }}>
           {sources > 0 && <span>{sources} src</span>}
-          {spend > 0 && <span>${spend.toFixed(2)}</span>}
+          {spend > 0 && <span>${spend.toFixed(2)}{budget > 0 ? ` / $${budget.toFixed(2)}` : ""}</span>}
         </div>
       ) : null}
     </div>

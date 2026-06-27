@@ -104,43 +104,62 @@ function buildGraph(view: HuntView): { nodes: Node[]; edges: Edge[] } {
       phase: w.phase,
       sources: w.sources,
       spendUsd: w.spendUsd,
+      budgetUsd: w.budgetUsd,
     } satisfies WolfNodeData,
   }));
 
-  // The plan's spine: Alpha → Beta → Scouts (parallel) → Tracker → Howler → Hunter;
-  // Sentinel watches from Alpha. Only link wolves that exist on the canvas.
+  // Data-driven spine — derived from whatever team Alpha built, not a fixed roster. Flow:
+  // Alpha → Beta → Scouts (N, parallel) → Tracker → Sentinel → Howler. The Elder watches from
+  // Alpha; the Doctor roams to whoever it's healing; clones attach to the wolf they copied.
+  const byId = new Map(wolves.map((w) => [w.wolfId, w]));
   const alpha = first("alpha");
   const beta = first("beta");
   const tracker = first("tracker");
+  const sentinel = first("sentinel");
   const howler = first("howler");
   const hunter = first("hunter");
-  const sentinel = first("sentinel");
+  const elder = first("elder");
   const scouts = byRole("scout");
+  const doctors = byRole("doctor");
+  const scoutHub = beta ?? alpha;
 
   const links: Array<[WolfView | undefined, WolfView | undefined]> = [];
   if (alpha && beta) links.push([alpha, beta]);
-  scouts.forEach((s) => {
-    links.push([beta ?? alpha, s]);
-    if (tracker) links.push([s, tracker]);
+  scouts.forEach((sc) => {
+    links.push([scoutHub, sc]);
+    if (tracker) links.push([sc, tracker]);
   });
-  if (!scouts.length && tracker) links.push([beta ?? alpha, tracker]);
-  if (tracker && howler) links.push([tracker, howler]);
+  if (!scouts.length && tracker) links.push([scoutHub, tracker]);
+  if (tracker && sentinel) links.push([tracker, sentinel]);
+  const preWriter = sentinel ?? tracker; // verify-then-write, or straight to write
+  if (preWriter && howler) links.push([preWriter, howler]);
   if (howler && hunter) links.push([howler, hunter]);
-  if (alpha && sentinel) links.push([alpha, sentinel]);
+  if (alpha && elder) links.push([alpha, elder]);
+  doctors.forEach((d) => {
+    const target = d.healing ? byId.get(d.healing) : undefined;
+    links.push(target ? [d, target] : [alpha, d]);
+  });
+  // Clone lineage: a clone hangs off the wolf it copied (covers cloned Doctors/trackers).
+  wolves.forEach((w) => {
+    if (w.parentId && byId.has(w.parentId)) links.push([byId.get(w.parentId), w]);
+  });
 
-  const edges: Edge[] = links
-    .filter(([a, b]) => a && b && a.wolfId !== b.wolfId)
-    .map(([a, b]) => {
-      const state = edgeState(a, b);
-      return {
-        id: `${a!.wolfId}->${b!.wolfId}`,
-        source: a!.wolfId,
-        target: b!.wolfId,
-        type: "smoothstep",
-        animated: state === "flowing",
-        style: styleFor(state, ROLE_COLOR[a!.role]),
-      } satisfies Edge;
-    });
+  const byEdgeId = new Map<string, Edge>();
+  for (const [a, b] of links) {
+    if (!a || !b || a.wolfId === b.wolfId) continue;
+    const id = `${a.wolfId}->${b.wolfId}`;
+    if (byEdgeId.has(id)) continue;
+    const state = edgeState(a, b);
+    byEdgeId.set(id, {
+      id,
+      source: a.wolfId,
+      target: b.wolfId,
+      type: "smoothstep",
+      animated: state === "flowing",
+      style: styleFor(state, ROLE_COLOR[a.role]),
+    } satisfies Edge);
+  }
+  const edges = [...byEdgeId.values()];
 
   return { nodes: layoutPack(nodes, edges), edges };
 }

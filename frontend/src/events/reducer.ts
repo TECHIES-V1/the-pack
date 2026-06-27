@@ -25,6 +25,10 @@ export interface WolfView {
   phase?: string; // latest wolf_progress phase (searching | reading | thinking | …)
   sources: number; // hits this wolf has gathered (from tool_result)
   spendUsd: number; // this wolf's cumulative spend (from tokens_spent)
+  // v2 (Phase 2): the per-task team, clones, and the roaming Doctor.
+  parentId?: string; // set when this wolf is a clone (wolf_spawned.parent_wolf_id)
+  budgetUsd?: number; // this wolf's own spend cap (wolf_spawned.budget_usd)
+  healing?: string; // for a Doctor: the wolf it's currently tending (doctor_dispatched)
 }
 
 export interface FeedLine {
@@ -62,6 +66,16 @@ export interface PlanView {
   est_time: number;
   strategy?: string; // the selected research strategy (additive plan_proposed field)
   queries?: string[]; // the angles the pack will chase (additive) — editable before approval
+  team?: TeamMember[]; // v2: the formation Alpha built — the canvas + Edit Panel read this
+  edges?: [string, string][]; // v2: optional explicit formation DAG (role→role)
+}
+
+export interface TeamMember {
+  role: string;
+  count: number;
+  tier?: "max" | "plus" | "flash";
+  thinking?: boolean;
+  budget_usd?: number;
 }
 
 export interface HuntView {
@@ -162,6 +176,8 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           est_time: f<number>(ev, "est_time"),
           strategy: ev.payload["strategy"] as string | undefined,
           queries: ev.payload["queries"] as string[] | undefined,
+          team: ev.payload["team"] as TeamMember[] | undefined,
+          edges: ev.payload["edges"] as [string, string][] | undefined,
         },
       };
 
@@ -205,6 +221,8 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
             thinking: f<boolean>(ev, "thinking"),
             sources: 0,
             spendUsd: 0,
+            parentId: (ev.payload["parent_wolf_id"] as string | null) ?? undefined,
+            budgetUsd: (ev.payload["budget_usd"] as number | null) ?? undefined,
           },
         },
       };
@@ -335,6 +353,26 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         wolves: setWolf(s, f(ev, "wolf_id"), "done"),
         feed: feed(s, ev, f(ev, "note_plain_english")),
       };
+
+    case "doctor_dispatched": {
+      // The Doctor roams to a faulted wolf — mark who it's tending so the canvas can draw the link.
+      const doctorId = f(ev, "doctor_id");
+      const target = f(ev, "target_wolf_id");
+      return {
+        ...s,
+        wolves: patchWolf(s, doctorId, { status: "hunting", healing: target }),
+        feed: feed(s, ev, `The Doctor moved in to patch ${target}.`),
+      };
+    }
+
+    case "doctor_healed": {
+      const doctorId = f(ev, "doctor_id");
+      return {
+        ...s,
+        wolves: patchWolf(s, doctorId, { status: "done", healing: undefined }),
+        feed: feed(s, ev, f(ev, "note_plain_english")),
+      };
+    }
 
     case "boundary_warning":
       return {
