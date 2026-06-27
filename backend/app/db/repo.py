@@ -388,6 +388,19 @@ class Repo:
             spec,
         )
 
+    # --- memory (v2): what the pack learned across hunts (local-only) ------------------
+
+    async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
+        await self._pool.execute(
+            "INSERT INTO memory (hunt_id, kind, text) VALUES ($1, $2, $3)", hunt_id, kind, text
+        )
+
+    async def recent_memory(self, limit: int = 5) -> list[dict[str, Any]]:
+        rows = await self._pool.fetch(
+            "SELECT hunt_id, kind, text FROM memory ORDER BY id DESC LIMIT $1", limit
+        )
+        return [dict(r) for r in rows]
+
     # --- checkpoints (stub now; resume logic NEXT) -------------------------------------
 
     async def save_checkpoint(

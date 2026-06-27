@@ -47,6 +47,7 @@ from app.prompts import load_prompt
 from app.qwen import pricing
 from app.qwen.client import OnDelta, QwenClient
 from app.qwen.types import CompletionResult
+from app.tools.memory import recall, remember
 from app.tools.web import WEB_FETCH, WEB_SEARCH
 
 # v2: Alpha builds the team per task. Each role's tier/thinking/default per-wolf budget cap is fixed
@@ -64,9 +65,9 @@ _ROLE_SPEC: dict[str, tuple[str, bool, float]] = {
     "doctor": ("flash", False, 0.05),  # v2 field medic — heals faulted agents (Phase 2.5)
 }
 
-# Canvas order: leads → the variable scouts → support. (Elder joins in 2.6 once it has a prompt.)
+# Canvas order: leads → the variable scouts → support (incl. the v2 Elder, the memory agent).
 _LEAD_ROLES = ["alpha", "beta"]
-_SUPPORT_ROLES = ["tracker", "sentinel", "howler"]
+_SUPPORT_ROLES = ["tracker", "sentinel", "howler", "elder"]
 _DEFAULT_SCOUTS = 3
 _MIN_SCOUTS = 1
 _MAX_SCOUTS = 5
@@ -232,6 +233,7 @@ class Supervisor:
         self._relieved: set[str] = set()  # v2: wolves stood down at their own cap
         self._doctors: list[str] = []  # v2: spawned Doctors (clone to heal several at once)
         self._faulted: set[str] = set()  # v2: wolves the Doctor has been sent to heal
+        self._memory_note: str = ""  # v2: what the Elder recalled to seed the plan
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -282,19 +284,18 @@ class Supervisor:
     # --- planning + approval -----------------------------------------------------------
 
     async def _propose_plan(self) -> None:
-        """Beta turns the real task into a plan (structured output). Pre-budget, so this call
-        is NOT boundary-gated and NOT counted against the hunt's cumulative spend."""
+        """Beta turns the real task into a plan (structured output). Pre-budget, so this call is NOT
+        boundary-gated. The Elder first recalls past lessons and whispers them to Beta."""
+        self._memory_note = await recall(self._repo)
         beta = self._make_wolf("beta", "beta", "plus", True)
+        context = f"Coordination strategy: {self._strategy.label} ({self._strategy.pattern})."
+        if self._memory_note:
+            context += f"\n\n{self._memory_note}"
         parsed: dict = {}
         with contextlib.suppress(Exception):
             res = await beta.think(
                 "plan",
-                messages=self._messages(
-                    beta,
-                    "plan",
-                    context=f"Coordination strategy: {self._strategy.label} "
-                    f"({self._strategy.pattern}).",
-                ),
+                messages=self._messages(beta, "plan", context=context),
                 response_schema=PLAN_SCHEMA,
             )
             parsed = res.parsed or {}
@@ -337,7 +338,7 @@ class Supervisor:
                     "wolves": ["howler"],
                 },
             ],
-            "wolves": [*scout_ids, "tracker", "sentinel", "howler"],
+            "wolves": [*scout_ids, "tracker", "sentinel", "howler", "elder"],
             "pattern": self._strategy.pattern,
             "assumptions": assumptions or [f"scope: {task}", "recent sources", "briefing format"],
             "est_cost": float(parsed.get("est_cost") or 0.6),
@@ -377,8 +378,8 @@ class Supervisor:
         if isinstance(raw_team, list) and raw_team:
             self._team = _build_team({"team": raw_team})
             self._plan["team"] = self._team
-            workers = [*_wolf_ids("scout", self._scout_count()), "tracker", "sentinel", "howler"]
-            self._plan["wolves"] = workers
+            scouts = _wolf_ids("scout", self._scout_count())
+            self._plan["wolves"] = [*scouts, "tracker", "sentinel", "howler", "elder"]
             diff["team"] = self._team
         raw_queries = edits.get("queries")
         if isinstance(raw_queries, list):
@@ -557,6 +558,23 @@ class Supervisor:
                 "step_id": "s0-brief",
                 "wolf_id": "beta",
                 "output_ref": f"art_{self._hunt_id}_plan",
+                "confidence": 0.9,
+            },
+        )
+        # The Elder consulted the pack's memory before the plan — light its node with what it recalled.
+        recalled = "Recalled past lessons." if self._memory_note else "No past hunts yet."
+        await self._emit(
+            "step_started",
+            "elder",
+            {"step_id": "s0-elder", "wolf_id": "elder", "summary": recalled},
+        )
+        await self._emit(
+            "step_completed",
+            "elder",
+            {
+                "step_id": "s0-elder",
+                "wolf_id": "elder",
+                "output_ref": f"art_{self._hunt_id}_memory",
                 "confidence": 0.9,
             },
         )
@@ -893,6 +911,10 @@ class Supervisor:
                 "confidence": 0.95,
             },
         )
+        # The Elder records one durable takeaway for next time (best-effort, local-only).
+        strategy = self._plan.get("strategy", "orchestrate")
+        takeaway = f"Hunted '{self.task}' via {strategy} — {len(sources)} sources."
+        await remember(self._repo, self._hunt_id, takeaway)
         await self._emit("hunt_completed", "engine", {"final_artifact_id": artifact_id, "totals": totals})
         await self._repo.set_hunt_state(self._hunt_id, "returned")
 

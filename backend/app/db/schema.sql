@@ -88,6 +88,16 @@ CREATE TABLE IF NOT EXISTS instincts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Memory (v2): what the pack learned across hunts. Local-only, no accounts. The Elder reads recent
+-- entries to seed planning and writes a takeaway when a hunt finishes.
+CREATE TABLE IF NOT EXISTS memory (
+    id         BIGSERIAL   PRIMARY KEY,
+    hunt_id    TEXT,
+    kind       TEXT        NOT NULL DEFAULT 'takeaway',
+    text       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Feedback: thumbs up/down votes on Alpha replies (turn_index matches the chatStore turn array).
 CREATE TABLE IF NOT EXISTS feedback (
     feedback_id TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,

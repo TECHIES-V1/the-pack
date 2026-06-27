@@ -18,6 +18,13 @@ class FakeRepo:
         self.events: dict[str, list[Event]] = {}
         self.hunts: dict[str, dict[str, Any]] = {}
         self.artifacts: list[dict[str, Any]] = []
+        self.memory: list[dict[str, Any]] = []
+
+    async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
+        self.memory.append({"hunt_id": hunt_id, "kind": kind, "text": text})
+
+    async def recent_memory(self, limit: int = 5) -> list[dict[str, Any]]:
+        return list(reversed(self.memory))[:limit]
 
     async def create_hunt(
         self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"

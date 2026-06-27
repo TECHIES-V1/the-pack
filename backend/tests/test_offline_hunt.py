@@ -176,6 +176,38 @@ async def test_offline_doctor_heals_faults_and_clones() -> None:
         assert not list(validator.iter_errors(e.model_dump()))
 
 
+async def test_memory_recall_and_remember_roundtrip() -> None:
+    """v2: local memory recalls empty on a first hunt, then surfaces a written takeaway."""
+    from app.tools.memory import recall, remember
+
+    repo = FakeRepo()
+    assert await recall(repo) == ""  # nothing learned yet
+    await remember(repo, "h1", "Prefer primary sources for finance topics.")
+    note = await recall(repo)
+    assert "Prefer primary sources" in note
+
+
+async def test_offline_elder_recalls_and_remembers() -> None:
+    """v2: the Elder appears, recalls seeded memory into planning, and writes a takeaway."""
+    repo = FakeRepo()
+    await repo.save_memory(None, "takeaway", "Prefer primary sources for finance topics.")
+    hunt_id = "hunt_elder"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    events = repo.all_events(hunt_id)
+
+    assert any(e.type == "wolf_spawned" and e.payload["role"] == "elder" for e in events)
+    elder = next(e for e in events if e.type == "step_started" and e.payload["wolf_id"] == "elder")
+    assert "Recalled" in elder.payload["summary"], "the seeded memory reached the Elder's recall"
+    assert len(repo.memory) == 2 and any("BNPL" in m["text"] for m in repo.memory)
+
+
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])
 async def test_offline_topic_awareness(strategy: str) -> None:
     """The hunt is topic-aware: the scouts' real queries mention the task, not a hardcoded demo."""
