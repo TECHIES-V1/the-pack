@@ -172,6 +172,10 @@ class Engine(Protocol):
 
     async def progress(self, wolf_id: str, phase: str, text: str) -> None: ...
 
+    async def clone(self, wolf_id: str) -> str: ...
+
+    async def spawn(self, role: str) -> str: ...
+
 
 # --- the strategy base --------------------------------------------------------------------
 

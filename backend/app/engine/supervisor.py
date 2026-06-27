@@ -61,6 +61,7 @@ _ROLE_SPEC: dict[str, tuple[str, bool, float]] = {
     "sentinel": ("max", True, 0.20),
     "howler": ("plus", False, 0.15),
     "elder": ("flash", False, 0.05),  # v2 memory agent — wired in Phase 2.6
+    "doctor": ("flash", False, 0.05),  # v2 field medic — heals faulted agents (Phase 2.5)
 }
 
 # Canvas order: leads → the variable scouts → support. (Elder joins in 2.6 once it has a prompt.)
@@ -229,6 +230,8 @@ class Supervisor:
         self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap
         self._wolf_spend: dict[str, float] = {}  # v2: per-wolf cumulative spend
         self._relieved: set[str] = set()  # v2: wolves stood down at their own cap
+        self._doctors: list[str] = []  # v2: spawned Doctors (clone to heal several at once)
+        self._faulted: set[str] = set()  # v2: wolves the Doctor has been sent to heal
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -448,6 +451,89 @@ class Supervisor:
                     "parent_wolf_id": None,
                 },
             )
+
+    async def _spawn_wolf(
+        self,
+        role: str,
+        *,
+        parent: str | None = None,
+        tier: str | None = None,
+        thinking: bool | None = None,
+        budget: float | None = None,
+    ) -> str:
+        """Spawn ONE wolf mid-hunt (a clone or a fresh role) and emit wolf_spawned. Returns its id.
+        Ids follow the roster convention: the bare role, then role-2, role-3 … as copies appear."""
+        d_tier, d_think, d_budget = _ROLE_SPEC.get(role, ("flash", False, 0.05))
+        tier = tier or d_tier
+        thinking = d_think if thinking is None else thinking
+        budget = d_budget if budget is None else budget
+        kin = [w for w in self._wolves if w == role or w.startswith(f"{role}-")]
+        wid = role if not kin else f"{role}-{len(kin) + 1}"
+        self._wolves[wid] = self._make_wolf(wid, role, tier, thinking)
+        self._wolf_budget[wid] = budget
+        await self._emit(
+            "wolf_spawned",
+            "engine",
+            {
+                "wolf_id": wid,
+                "role": role,
+                "model_tier": tier,
+                "thinking": thinking,
+                "prompt_version": load_prompt(role).version,
+                "budget_usd": budget,
+                "parent_wolf_id": parent,
+            },
+        )
+        return wid
+
+    async def clone(self, wolf_id: str) -> str:
+        """Mid-hunt: clone an existing wolf (same role/tier) to add capacity. Returns the new id."""
+        src = self._wolves.get(wolf_id)
+        if src is None:
+            return ""
+        return await self._spawn_wolf(
+            src.role, parent=wolf_id, tier=src.tier, thinking=src.thinking,
+            budget=self._wolf_budget.get(wolf_id),
+        )
+
+    async def spawn(self, role: str) -> str:
+        """Mid-hunt: add a fresh wolf of a role (Alpha widening the pack). Returns the new id."""
+        return await self._spawn_wolf(role)
+
+    async def _ensure_doctor(self) -> str:
+        """A Doctor roams to heal a fault; it clones itself to tend several at once (capped). Returns
+        the Doctor handling the latest fault."""
+        need = max(1, min(len(self._faulted), 3))
+        while len(self._doctors) < need:
+            parent = self._doctors[0] if self._doctors else None
+            self._doctors.append(await self._spawn_wolf("doctor", parent=parent))
+        return self._doctors[-1]
+
+    async def _heal_with_doctor(self, target_wolf_id: str, pattern: str) -> None:
+        """The Doctor is dispatched to a faulted wolf and heals it (reroute). Layered on top of the
+        Stray path — the Stray still fires; the Doctor is the visible healer."""
+        self._faulted.add(target_wolf_id)
+        doctor_id = await self._ensure_doctor()
+        await self._emit(
+            "doctor_dispatched",
+            doctor_id,
+            {"doctor_id": doctor_id, "target_wolf_id": target_wolf_id, "reason": pattern},
+        )
+        note = {
+            "repeat_fail": f"{doctor_id} patched {target_wolf_id} after it kept hitting dead ends.",
+            "loop": f"{doctor_id} reset {target_wolf_id}'s angle — it was circling.",
+            "timeout": f"{doctor_id} pulled {target_wolf_id} back after it stalled.",
+        }.get(pattern, f"{doctor_id} healed {target_wolf_id} and the pack moved on.")
+        await self._emit(
+            "doctor_healed",
+            doctor_id,
+            {
+                "doctor_id": doctor_id,
+                "target_wolf_id": target_wolf_id,
+                "action": "reroute",
+                "note_plain_english": note,
+            },
+        )
 
     async def _open_pack(self) -> None:
         """Wake the pack's leadership on the canvas at kickoff. Alpha takes the lead and stays active
@@ -1026,12 +1112,13 @@ class Supervisor:
         )
 
     async def _stray_event(self, wolf_id: str, pattern: str, evidence_ref: str | None) -> None:
-        """Narrate a Stray and Alpha's recovery (reroute). The hunt stays in 'hunting'."""
+        """Narrate a Stray and the recovery. The Doctor performs the heal; the hunt stays 'hunting'."""
         await self._emit(
             "stray_detected",
             "engine",
             {"wolf_id": wolf_id, "pattern": pattern, "evidence_ref": evidence_ref or f"art_{wolf_id}_stray"},
         )
+        await self._heal_with_doctor(wolf_id, pattern)  # v2: the Doctor roams in to heal the fault
         note = {
             "repeat_fail": f"{wolf_id} kept hitting dead ends — Alpha rerouted it.",
             "loop": f"{wolf_id} was circling the same ground — Alpha reset its angle.",

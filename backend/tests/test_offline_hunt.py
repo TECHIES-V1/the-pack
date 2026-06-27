@@ -149,6 +149,33 @@ async def test_offline_per_wolf_budget_relieves_a_scout(monkeypatch: pytest.Monk
         assert not list(validator.iter_errors(e.model_dump()))
 
 
+async def test_offline_doctor_heals_faults_and_clones() -> None:
+    """v2: a fault dispatches the Doctor to heal it; a second concurrent fault clones the Doctor."""
+    repo = FakeRepo()
+    hunt_id = "hunt_doctor"
+    emitter = Emitter(hunt_id, repo)
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), asyncio.Queue(),
+        source="typed", raw_input="a topic", strategy="orchestrate",
+    )
+    await sup._stray_event("scout-1", "timeout", None)
+    await sup._stray_event("scout-2", "repeat_fail", None)  # a second fault → the Doctor clones
+    events = repo.all_events(hunt_id)
+    types = [e.type for e in events]
+
+    assert types.count("doctor_dispatched") == 2
+    assert types.count("doctor_healed") == 2
+    spawns = [e.payload for e in events if e.type == "wolf_spawned"]
+    doctors = [p for p in spawns if p["role"] == "doctor"]
+    assert len(doctors) == 2, "the Doctor clones itself for the second fault"
+    assert any(d.get("parent_wolf_id") for d in doctors), "the clone records its parent Doctor"
+    # the Stray path still fires alongside the Doctor, and every event is schema-valid.
+    assert types.count("stray_detected") == 2 and types.count("stray_recovered") == 2
+    validator = Draft202012Validator(load_event_schema())
+    for e in events:
+        assert not list(validator.iter_errors(e.model_dump()))
+
+
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])
 async def test_offline_topic_awareness(strategy: str) -> None:
     """The hunt is topic-aware: the scouts' real queries mention the task, not a hardcoded demo."""
