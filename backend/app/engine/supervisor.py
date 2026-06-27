@@ -226,7 +226,9 @@ class Supervisor:
         self._strategy = get_strategy(strategy)
         self._wolves: dict[str, Wolf] = {}
         self._team: list[dict] = []  # v2: the per-task formation Beta proposes / the user edits
-        self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap (gated in _dispatch, 2.4)
+        self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap
+        self._wolf_spend: dict[str, float] = {}  # v2: per-wolf cumulative spend
+        self._relieved: set[str] = set()  # v2: wolves stood down at their own cap
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -819,8 +821,39 @@ class Supervisor:
         phase: str | None = None,
         response_schema: dict | None = None,
     ) -> CompletionResult:
-        """The one path a model call takes. Gate BEFORE the call, account AFTER."""
+        """The one path a model call takes. Per-wolf cap + hunt Boundary gate BEFORE, account AFTER."""
+        # A wolf already relieved (it blew its own cap at the floor tier) makes no further calls.
+        if wolf.wolf_id in self._relieved:
+            return self._relieved_result(wolf)
+
         est = pricing.estimate(wolf.tier)
+
+        # Per-wolf cap (v2): one runaway wolf must not drain the whole hunt. If its next call would
+        # blow its own budget, drop it to the floor tier once; if it would STILL blow the cap there,
+        # relieve it — it stands down and the rest of the pack carries on (never halts the hunt).
+        cap = self._wolf_budget.get(wolf.wolf_id)
+        if cap is not None and self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+            if wolf.tier != "flash":
+                from_tier, thinking_off = wolf.tier, wolf.thinking
+                wolf.tier, wolf.thinking = "flash", False
+                await self._emit(
+                    "boundary_downgrade",
+                    "engine",
+                    {
+                        "wolf_id": wolf.wolf_id,
+                        "from_tier": from_tier,
+                        "to_tier": "flash",
+                        "thinking_off": thinking_off,
+                    },
+                )
+                est = pricing.estimate(wolf.tier)
+            if self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+                self._relieved.add(wolf.wolf_id)
+                await self.progress(
+                    wolf.wolf_id, phase or "thinking", "Hit its budget — standing down."
+                )
+                return self._relieved_result(wolf)
+
         verdict = self._boundary.check(est)
 
         if verdict is Verdict.HALT:
@@ -858,6 +891,7 @@ class Supervisor:
             on_delta=on_delta,
         )
         self._boundary.cumulative_usd += result.cost_usd
+        self._wolf_spend[wolf.wolf_id] = self._wolf_spend.get(wolf.wolf_id, 0.0) + result.cost_usd
         await self._emit(
             "tokens_spent",
             wolf.wolf_id,
@@ -871,6 +905,14 @@ class Supervisor:
             },
         )
         return result
+
+    def _relieved_result(self, wolf: Wolf) -> CompletionResult:
+        """An empty result for a wolf relieved at its budget cap — no spend, no model call. Callers
+        fall back to their defaults, so a relieved wolf simply contributes nothing further."""
+        return CompletionResult(
+            text="", model="(relieved)", tier=wolf.tier,
+            in_tokens=0, out_tokens=0, cost_usd=0.0, parsed=None,
+        )
 
     async def _scout_search(
         self, wolf: Wolf, query: str

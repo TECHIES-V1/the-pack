@@ -119,6 +119,36 @@ async def test_offline_critique_opens_a_standoff() -> None:
     assert any(e.type == "standoff_resolved" for e in events)
 
 
+async def test_offline_per_wolf_budget_relieves_a_scout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v2: a scout that would blow its own tiny per-wolf cap stands down — the hunt still finishes
+    (one runaway wolf can't drain or halt the whole hunt)."""
+    from app.engine import supervisor as sup_mod
+
+    tier, thinking, _ = sup_mod._ROLE_SPEC["scout"]
+    monkeypatch.setitem(sup_mod._ROLE_SPEC, "scout", (tier, thinking, 0.001))  # near-zero cap
+
+    repo = FakeRepo()
+    hunt_id = "hunt_offline_relief"
+    emitter = Emitter(hunt_id, repo)
+    client = QwenClient()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, client, commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    events = repo.all_events(hunt_id)
+
+    assert any(wid.startswith("scout") for wid in sup._relieved), "a scout should be relieved"
+    assert events[-1].type == "hunt_completed", "the hunt still finishes despite a relieved scout"
+    # seq stays dense and every event is schema-valid even on the relief path.
+    assert [e.seq for e in events] == list(range(len(events)))
+    validator = Draft202012Validator(load_event_schema())
+    for e in events:
+        assert not list(validator.iter_errors(e.model_dump()))
+
+
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])
 async def test_offline_topic_awareness(strategy: str) -> None:
     """The hunt is topic-aware: the scouts' real queries mention the task, not a hardcoded demo."""
