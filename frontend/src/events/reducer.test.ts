@@ -73,3 +73,53 @@ describe("reducer over the fixture pack", () => {
     void initialHuntView();
   });
 });
+
+// The chat narration is the reducer's `feed`: each event the user should hear about becomes one
+// Alpha-voice line, in order. These pin the wording so the chat stays substantive, not robotic.
+function ev(type: string, payload: Record<string, unknown>, seq: number): PackEvent {
+  return {
+    event_id: `e${seq}`,
+    hunt_id: "h1",
+    seq,
+    ts: "2026-01-01T00:00:00Z",
+    type: type as PackEvent["type"],
+    actor: "engine",
+    payload,
+  };
+}
+
+const feedTexts = (events: PackEvent[]): string[] => reduceAll(events).feed.map((f) => f.text);
+
+describe("reducer narration (the chat feed)", () => {
+  it("voices the key beats in Alpha's words, in order", () => {
+    const texts = feedTexts([
+      ev("plan_proposed", { steps: [], wolves: [], pattern: "p", assumptions: [], est_cost: 0, est_time: 0, queries: ["a", "b", "c"] }, 1),
+      ev("plan_approved", { boundary_usd: 1 }, 2),
+      ev("wolf_spawned", { wolf_id: "tracker", role: "tracker", model_tier: "plus", thinking: true }, 3),
+      ev("step_started", { wolf_id: "tracker", step_id: "s2", summary: "merge" }, 4),
+      ev("message_passed", { from_wolf: "scout-1", to_wolf: "tracker", intent: "handoff_findings", summary: "5 launches confirmed" }, 5),
+      ev("hold_opened", { hold_id: "h1", question: "A or B?", options: ["A", "B"], recommended: "A" }, 6),
+      ev("hunt_completed", { final_artifact_id: "art_f", totals: {} }, 7),
+    ]);
+    expect(texts).toEqual([
+      "On it — sending the scouts out on 3 angles.",
+      "Tracker's cross-referencing what the scouts found.",
+      "scout-1 is back: 5 launches confirmed",
+      "I hit a fork — I need your call below: A or B?",
+      "Your brief's ready.",
+    ]);
+  });
+
+  it("voices the failure paths", () => {
+    expect(feedTexts([ev("boundary_halt", {}, 1)])).toContain(
+      "Paused — the next step would cross your cap. Raise it to keep going.",
+    );
+    expect(feedTexts([ev("hunt_failed", { reason_plain_english: "engine error" }, 1)])).toContain(
+      "This one didn't come together: engine error",
+    );
+  });
+
+  it("keeps per-search noise out of the chat", () => {
+    expect(feedTexts([ev("tool_called", { wolf_id: "scout-1", tool: "web_search", args_summary: "x" }, 1)])).toHaveLength(0);
+  });
+});

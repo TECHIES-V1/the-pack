@@ -49,7 +49,7 @@ function toSources(raw: unknown): Source[] {
   });
 }
 
-export function DocumentView({ huntId }: { huntId: string }) {
+export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: () => void }) {
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
@@ -108,7 +108,11 @@ export function DocumentView({ huntId }: { huntId: string }) {
           <button className="p-2 text-[#a1a1aa] hover:text-white" title="More" onClick={() => setMenu((m) => !m)}>
             <LuEllipsis size={16} />
           </button>
-          <button className="p-2 text-[#a1a1aa] hover:text-white" title="Home" onClick={() => goTo("/")}>
+          <button
+            className="p-2 text-[#a1a1aa] hover:text-white"
+            title={onClose ? "Close" : "Home"}
+            onClick={() => (onClose ? onClose() : goTo("/"))}
+          >
             <LuX size={16} />
           </button>
           {menu && (

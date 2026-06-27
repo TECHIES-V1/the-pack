@@ -119,6 +119,13 @@ function setWolf(
 // wolf_progress phases that mean "deliberating" (shimmer) vs "actively working".
 const THINKING_PHASES = new Set(["thinking", "critiquing"]);
 
+// Alpha's chat line when a lead role starts its step. Scouts/alpha/beta narrate via their handoffs.
+const STEP_NARRATION: Record<string, string> = {
+  tracker: "Tracker's cross-referencing what the scouts found.",
+  sentinel: "Sentinel's checking every claim carries a real source.",
+  howler: "Writing it all up into your brief now.",
+};
+
 function feed(s: HuntView, ev: PackEvent, text: string): FeedLine[] {
   return [...s.feed, { seq: ev.seq, ts: ev.ts, text }];
 }
@@ -166,7 +173,11 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       return { ...s, plan, feed: feed(s, ev, "Updated the plan before the hunt.") };
     }
 
-    case "plan_approved":
+    case "plan_approved": {
+      const angles = s.plan?.queries?.length ?? 0;
+      const line = angles
+        ? `On it — sending the scouts out on ${angles} angle${angles === 1 ? "" : "s"}.`
+        : "On it — sending the scouts out.";
       return {
         ...s,
         state: "hunting",
@@ -176,7 +187,9 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           pct: 0,
           status: "normal",
         },
+        feed: feed(s, ev, line),
       };
+    }
 
     case "wolf_spawned": {
       const wolfId = f(ev, "wolf_id");
@@ -197,8 +210,14 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       };
     }
 
-    case "step_started":
-      return { ...s, wolves: setWolf(s, f(ev, "wolf_id"), "hunting") };
+    case "step_started": {
+      const wolfId = f(ev, "wolf_id");
+      const wolves = setWolf(s, wolfId, "hunting");
+      // Narrate only the lead roles' phases — scouts/alpha/beta speak through their handoffs.
+      const role = s.wolves[wolfId]?.role;
+      const line = STEP_NARRATION[role ?? ""];
+      return line ? { ...s, wolves, feed: feed(s, ev, line) } : { ...s, wolves };
+    }
 
     case "step_completed":
       // Work done — keep the last liveText as the node's result line, but stop deliberating.
@@ -229,12 +248,13 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       return {
         ...s,
         wolves: patchWolf(s, from, { status }),
-        feed: feed(s, ev, `${from} handed off to ${f(ev, "to_wolf")}: ${f(ev, "summary")}`),
+        feed: feed(s, ev, `${from} is back: ${f(ev, "summary")}`),
       };
     }
 
     case "tool_called":
-      return { ...s, feed: feed(s, ev, `${f(ev, "wolf_id")} is searching: ${f(ev, "args_summary")}`) };
+      // Per-search noise stays off the chat — the scout's handoff carries the substance.
+      return s;
 
     case "tool_result": {
       const wolfId = f(ev, "wolf_id");
@@ -271,7 +291,7 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
           options: f<string[]>(ev, "options"),
           recommended: f(ev, "recommended"),
         },
-        feed: feed(s, ev, `The pack is holding: ${f(ev, "question")}`),
+        feed: feed(s, ev, `I hit a fork — I need your call below: ${f(ev, "question")}`),
       };
 
     case "hold_resolved":
@@ -282,22 +302,31 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         ...s,
         state: "standoff",
         activeStandoffId: f(ev, "standoff_id"),
-        feed: feed(s, ev, `${f(ev, "challenger")} challenged ${f(ev, "defendant")}.`),
+        feed: feed(
+          s,
+          ev,
+          `${f(ev, "challenger")} is challenging ${f(ev, "defendant")} on a shaky claim.`,
+        ),
       };
 
     case "standoff_turn":
-      return { ...s, feed: feed(s, ev, f(ev, "argument_summary")) };
+      // The back-and-forth stays off the chat; the open/resolved lines bracket the debate.
+      return s;
 
     case "standoff_resolved":
       return {
         ...s,
         state: "hunting",
         activeStandoffId: null,
-        feed: feed(s, ev, f(ev, "rationale")),
+        feed: feed(s, ev, `Settled it: ${f(ev, "rationale")}`),
       };
 
     case "stray_detected":
-      return { ...s, wolves: setWolf(s, f(ev, "wolf_id"), "stray") };
+      return {
+        ...s,
+        wolves: setWolf(s, f(ev, "wolf_id"), "stray"),
+        feed: feed(s, ev, `${f(ev, "wolf_id")} hit a wall — I'm rerouting it.`),
+      };
 
     case "stray_recovered":
       // The strayed wolf's task is abandoned (reroute/replan/respawn); it stops alerting.
@@ -308,13 +337,17 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
       };
 
     case "boundary_warning":
-      return { ...s, boundary: { ...s.boundary, status: "warn" } };
+      return {
+        ...s,
+        boundary: { ...s.boundary, status: "warn" },
+        feed: feed(s, ev, "We're getting close to your budget cap."),
+      };
 
     case "boundary_downgrade":
       return {
         ...s,
         boundary: { ...s.boundary, status: "downgraded" },
-        feed: feed(s, ev, `Eased ${f(ev, "wolf_id")} to a lighter tier to stay inside the Boundary.`),
+        feed: feed(s, ev, `Eased ${f(ev, "wolf_id")} to a lighter model to stay under budget.`),
       };
 
     case "boundary_halt":
@@ -322,7 +355,7 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         ...s,
         state: "halted_boundary",
         boundary: { ...s.boundary, status: "halted" },
-        feed: feed(s, ev, `The Boundary stopped the hunt before the next spend.`),
+        feed: feed(s, ev, "Paused — the next step would cross your cap. Raise it to keep going."),
       };
 
     case "artifact_created":
@@ -334,10 +367,15 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         state: "returned",
         finalArtifactId: f(ev, "final_artifact_id"),
         totals: f<Record<string, unknown>>(ev, "totals"),
+        feed: feed(s, ev, "Your brief's ready."),
       };
 
     case "hunt_failed":
-      return { ...s, state: "failed", feed: feed(s, ev, f(ev, "reason_plain_english")) };
+      return {
+        ...s,
+        state: "failed",
+        feed: feed(s, ev, `This one didn't come together: ${f(ev, "reason_plain_english")}`),
+      };
 
     case "hunt_stopped":
       return { ...s, state: "stopped_by_user" };
@@ -348,7 +386,9 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
         feed: feed(
           s,
           ev,
-          f<boolean>(ev, "mid_hunt") ? "You added context to the hunt." : "Added your material to the hunt.",
+          f<boolean>(ev, "mid_hunt")
+            ? "Got it — folding your note into the hunt."
+            : "Added your material to the hunt.",
         ),
       };
 

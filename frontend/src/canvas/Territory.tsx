@@ -15,7 +15,6 @@ import {
 
 import { ROLE_COLOR, nodeTypes, type WolfNodeData } from "./WolfNode";
 import { layoutPack } from "./packLayout";
-import { TraceRail } from "./TraceRail";
 import type { HuntView, WolfView } from "@/events/reducer";
 import type { HuntState } from "@/events/types";
 import type { WolfRole, WolfStatus } from "@/events/types";
@@ -170,7 +169,6 @@ export function Territory({ view }: { view: HuntView }) {
           <Background color="#242424" gap={22} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
-        <TraceRail feed={view.feed} />
       </div>
     </ReactFlowProvider>
   );

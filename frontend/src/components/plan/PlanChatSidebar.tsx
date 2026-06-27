@@ -15,6 +15,7 @@ import { OneBox } from "@/components/composer/OneBox";
 import { api, streamSSE, ApiError, type IntakeTurn } from "@/net/api";
 import { useHuntStore } from "@/store/huntStore";
 import { useChatStore } from "@/store/chatStore";
+import { useUiStore } from "@/store/uiStore";
 import { withCustomInstructions } from "@/store/settingsStore";
 
 const PANEL = "bg-[#1A1A1A] border border-[#2a2a2a] rounded-[12px]";
@@ -45,6 +46,7 @@ const MODES: { value: Autonomy; label: string; blurb: string }[] = [
 
 export function PlanChatSidebar({ huntId }: { huntId: string }) {
   const view = useHuntStore((s) => s.view);
+  const setBriefOpen = useUiStore((s) => s.setBriefOpen);
   const { turns, pending, addUser, startAlpha, addAlphaToken, commitAlpha, setPending, dropLastAlpha, truncateFrom, setAbortFn } =
     useChatStore();
   const [task, setTask] = useState("");
@@ -165,6 +167,23 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
   async function askAlpha(question: string) {
     addUser(question);
     await runAsk();
+  }
+
+  // Launch the pack — approve the plan with the chosen leash, budget, and any angle edits. Errors
+  // surface in the chat (a silent reset reads as "the button does nothing").
+  async function launch() {
+    setAskError(null);
+    setBusy(true);
+    try {
+      const edits = editedQueries
+        ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
+        : undefined;
+      await api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
+    } catch (err) {
+      setAskError(err instanceof ApiError ? ERROR_MESSAGES[err.kind] : ERROR_MESSAGES.unknown);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Feed the running hunt: the engine absorbs it before the next step (emits input_added).
@@ -310,7 +329,7 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
         </div>
       )}
 
-      {/* ---- Conversation only (the activity feed lives on the canvas TraceRail) ---------- */}
+      {/* ---- Conversation + Alpha's live narration (from the event log) ------------------- */}
       <div
         ref={scrollRef}
         role="log"
@@ -351,7 +370,16 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               </div>
             )}
 
-        {pending && <ThinkingIndicator size={22} />}
+        {/* Live narration — Alpha's running commentary, derived from the event log (view.feed). */}
+        {view.feed.map((line) => (
+          <div key={`feed-${line.seq}`} className="flex gap-2 items-start">
+            <AlphaAvatar size={22} />
+            <div className="text-[13px] leading-relaxed text-[#a1a1aa] pt-px min-w-0">{line.text}</div>
+          </div>
+        ))}
+
+        {/* One pulse: a reply streaming in, or the pack working between beats — never feels dead. */}
+        {(pending || RUNNING.has(view.state)) && <ThinkingIndicator size={22} />}
 
         {askError && (
           <div className="flex items-center gap-2.5">
@@ -365,8 +393,13 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
           </div>
         )}
 
-        {view.state === "failed" && (
-          <div className="text-[13px] text-[#e03a2f]">The pack couldn't finish this one.</div>
+        {view.state === "returned" && (
+          <button
+            onClick={() => setBriefOpen(true)}
+            className="self-start ml-[30px] rounded-lg bg-white text-black px-3 py-1.5 text-[13px] font-medium cursor-pointer border-none hover:bg-white/90"
+          >
+            Open brief →
+          </button>
         )}
       </div>
 
@@ -460,13 +493,8 @@ export function PlanChatSidebar({ huntId }: { huntId: string }) {
               ? {
                   label: busy ? "Sending…" : "Send the pack →",
                   active: true,
-                  onSend: () =>
-                    guard(() => {
-                      const edits = editedQueries
-                        ? { queries: editedQueries.map((s) => s.trim()).filter(Boolean) }
-                        : undefined;
-                      return api.approvePlan(huntId, { mode, boundary_usd: boundary, edits });
-                    }),
+                  busy,
+                  onSend: launch,
                 }
               : undefined
           }
