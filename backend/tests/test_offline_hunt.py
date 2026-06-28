@@ -419,6 +419,8 @@ async def test_offline_forge_renders_real_files() -> None:
     assert body("xlsx").startswith(b"PK")
     assert body("pptx").startswith(b"PK")
     assert body("png").startswith(b"\x89PNG")  # a real PNG
+    # M1: the export carries its Sources, not just the on-screen Reward.
+    assert "## Sources" in body("md").decode("utf-8")
     types = [e.type for e in repo.all_events(hunt_id)]
     assert "forge_started" in types and "forge_completed" in types
 

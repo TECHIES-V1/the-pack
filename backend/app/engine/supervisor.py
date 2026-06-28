@@ -972,7 +972,10 @@ class Supervisor:
     async def finish(self, draft_text: str, merged: Merged) -> None:
         """Save the final artifact + a provenance span map, then close the hunt."""
         artifact_id = new_artifact_id()
-        sources = self._dedupe_sources(merged.sources)
+        # Drop the full fetched/library `text` before persisting — the UI shows snippet, not text,
+        # and keeping it bloats the artifact (web fetch ≤1500, KB ≤1200 chars per source).
+        deduped = self._dedupe_sources(merged.sources)
+        sources = [{k: v for k, v in s.items() if k != "text"} for s in deduped]
         blocks = self._blocks or [{"text": draft_text, "source_ids": []}]
 
         # v3 — a BLOCK-LEVEL provenance map: each block → its exact sources (the click-any-line
@@ -1027,7 +1030,7 @@ class Supervisor:
             await self.progress("howler", "forge", "Making your files")
             await self._emit("forge_started", "howler", {"formats": list(MIME)})
             forged_ids: list[str] = []
-            for fmt, data in forge(blocks).items():
+            for fmt, data in forge(blocks, sources).items():  # v-fix: exports carry their Sources
                 fid = new_artifact_id()
                 await self._repo.save_artifact(
                     fid,
