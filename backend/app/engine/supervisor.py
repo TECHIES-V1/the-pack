@@ -324,7 +324,7 @@ class Supervisor:
     async def _propose_plan(self) -> None:
         """Beta turns the real task into a plan (structured output). Pre-budget, so this call is NOT
         boundary-gated. The Elder first recalls past lessons and whispers them to Beta."""
-        self._memory_note = await recall(self._repo)
+        self._memory_note = await recall(self._repo, self.task)
         beta = self._make_wolf("beta", "beta", "plus", True)
         context = f"Coordination strategy: {self._strategy.label} ({self._strategy.pattern})."
         if self._memory_note:

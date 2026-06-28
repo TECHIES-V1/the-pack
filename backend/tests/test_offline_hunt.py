@@ -181,16 +181,17 @@ async def test_memory_recall_and_remember_roundtrip() -> None:
     from app.tools.memory import recall, remember
 
     repo = FakeRepo()
-    assert await recall(repo) == ""  # nothing learned yet
+    assert await recall(repo, "finance") == ""  # nothing learned yet
     await remember(repo, "h1", "Prefer primary sources for finance topics.")
-    note = await recall(repo)
+    note = await recall(repo, "a finance topic")  # topic-relevant → recalled
     assert "Prefer primary sources" in note
+    assert await recall(repo, "medieval poetry") == ""  # unrelated topic → not recalled
 
 
 async def test_offline_elder_recalls_and_remembers() -> None:
     """v2: the Elder appears, recalls seeded memory into planning, and writes a takeaway."""
     repo = FakeRepo()
-    await repo.save_memory(None, "takeaway", "Prefer primary sources for finance topics.")
+    await repo.save_memory(None, "takeaway", "On the BNPL market: prefer primary sources.")
     hunt_id = "hunt_elder"
     emitter = Emitter(hunt_id, repo)
     commands: asyncio.Queue = asyncio.Queue()
@@ -241,27 +242,29 @@ async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> 
     assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
 
 
-async def test_memory_carries_across_hunts() -> None:
-    """v4.1: a takeaway written when one hunt finishes is recalled into the next hunt's planning."""
-    repo = FakeRepo()
+async def test_memory_recall_is_topic_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v4.1 + review M2: a takeaway is recalled into a RELATED next hunt, but NOT into an unrelated
+    one (global recency would pollute every hunt with irrelevant lessons)."""
 
-    c1: asyncio.Queue = asyncio.Queue()
-    c1.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
-    sup1 = Supervisor(
-        "hunt_m1", Emitter("hunt_m1", repo), repo, QwenClient(), c1,
-        source="typed", raw_input="the solid-state battery market", strategy="orchestrate",
-    )
-    await asyncio.wait_for(sup1.run(), timeout=15)
+    def _run(hunt_id: str, topic: str, repo: FakeRepo) -> Supervisor:
+        commands: asyncio.Queue = asyncio.Queue()
+        commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+        return Supervisor(
+            hunt_id, Emitter(hunt_id, repo), repo, QwenClient(), commands,
+            source="typed", raw_input=topic, strategy="orchestrate",
+        )
+
+    repo = FakeRepo()
+    await asyncio.wait_for(_run("hunt_m1", "the solid-state battery market", repo).run(), timeout=15)
     assert any(m["kind"] == "takeaway" for m in repo.memory)  # a takeaway was stored
 
-    c2: asyncio.Queue = asyncio.Queue()
-    c2.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
-    sup2 = Supervisor(
-        "hunt_m2", Emitter("hunt_m2", repo), repo, QwenClient(), c2,
-        source="typed", raw_input="a totally unrelated topic", strategy="orchestrate",
-    )
-    await asyncio.wait_for(sup2.run(), timeout=15)
-    assert "solid-state battery" in sup2._memory_note  # hunt 1's lesson reached hunt 2's planning
+    related = _run("hunt_m2", "solid-state battery supplier costs", repo)
+    await asyncio.wait_for(related.run(), timeout=15)
+    assert "solid-state battery" in related._memory_note  # relevant lesson reached planning
+
+    unrelated = _run("hunt_m3", "medieval european poetry", repo)
+    await asyncio.wait_for(unrelated.run(), timeout=15)
+    assert "solid-state battery" not in unrelated._memory_note  # no cross-topic pollution
 
 
 async def test_seed_team_overrides_beta_sizing() -> None:
