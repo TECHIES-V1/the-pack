@@ -242,7 +242,7 @@ async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 async def test_offline_draft_is_tagged_with_provenance() -> None:
-    """v3 (3.2): the final brief carries tagged blocks + a block-level provenance map for tracing."""
+    """v3 (3.2): the final brief carries tagged blocks + a block-level provenance map."""
     repo = FakeRepo()
     hunt_id = "hunt_prov"
     emitter = Emitter(hunt_id, repo)
@@ -262,6 +262,31 @@ async def test_offline_draft_is_tagged_with_provenance() -> None:
     prov = next(a for a in repo.artifacts if a["kind"] == "provenance_map")
     assert prov["content"]["spans"]
     assert final["content"]["span_map_ref"] == prov["artifact_id"]
+
+
+async def test_offline_forge_renders_real_files() -> None:
+    """v3 (3.4): the Forge turns the brief into real MD/HTML/PDF/DOCX files."""
+    import base64 as b64
+
+    repo = FakeRepo()
+    hunt_id = "hunt_forge"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    kinds = {a["kind"] for a in repo.artifacts}
+    assert {"md", "html", "pdf", "docx"} <= kinds
+    pdf = next(a for a in repo.artifacts if a["kind"] == "pdf")
+    assert b64.b64decode(pdf["content"]["b64"]).startswith(b"%PDF")  # a real PDF
+    docx = next(a for a in repo.artifacts if a["kind"] == "docx")
+    assert b64.b64decode(docx["content"]["b64"]).startswith(b"PK")  # a real .docx (zip)
+    types = [e.type for e in repo.all_events(hunt_id)]
+    assert "forge_started" in types and "forge_completed" in types
 
 
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])

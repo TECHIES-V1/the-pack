@@ -26,12 +26,14 @@ output), live it's Qwen. Nothing in this file changes when the key lands.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import re
 
 from app.db.repo import Repo
 from app.engine.boundary import Boundary, Verdict
 from app.engine.core import Emitter
+from app.engine.forge import MIME, forge
 from app.engine.ids import new_artifact_id, new_checkpoint_id, new_hold_id, new_standoff_id
 from app.engine.strategies import Conflict, CritiqueResult, Finding, Merged, get_strategy
 from app.engine.strategies.base import (
@@ -990,6 +992,35 @@ class Supervisor:
                 "provenance_span_map_ref": spanmap_ref,
             },
         )
+
+        # v3 — the Forge: render the brief into real files (the "making the file" phase). Skipped when
+        # there's no real brief (no sources). Best-effort: a render failure never blocks completion.
+        if blocks and not (self._no_sources or not sources):
+            await self.progress("howler", "forge", "Making your files")
+            await self._emit("forge_started", "howler", {"formats": list(MIME)})
+            forged_ids: list[str] = []
+            for fmt, data in forge(blocks).items():
+                fid = new_artifact_id()
+                await self._repo.save_artifact(
+                    fid,
+                    self._hunt_id,
+                    fmt,
+                    "howler",
+                    {
+                        "mime": MIME.get(fmt, "application/octet-stream"),
+                        "b64": base64.b64encode(data).decode(),
+                    },
+                )
+                await self._emit(
+                    "artifact_created",
+                    "howler",
+                    {"artifact_id": fid, "kind": fmt, "produced_by": "howler"},
+                )
+                forged_ids.append(fid)
+            await self._emit(
+                "forge_completed", "howler", {"formats": list(MIME), "artifact_ids": forged_ids}
+            )
+
         totals = {
             "cost_usd": round(self._boundary.cumulative_usd, 6),
             "time_s": int(self._plan.get("est_time", 210)),
