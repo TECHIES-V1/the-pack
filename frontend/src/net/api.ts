@@ -129,6 +129,10 @@ export interface ApprovePlanBody {
   boundary_usd: number;
   edits?: Record<string, unknown>;
 }
+export interface ArtifactMeta {
+  artifact_id: string;
+  kind: string; // md | html | pdf | docx
+}
 export interface RehearseResult {
   est_cost_usd: number;
   est_time_s: number;
@@ -232,6 +236,9 @@ export const api = {
   getShared: (token: string) =>
     req<{ title: string; content: Record<string, unknown> | null }>(`/share/${token}`),
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
+  // v3: the forged files (the Reward's format tabs) + a direct download URL for one of them.
+  getArtifacts: (id: string) => req<{ artifacts: ArtifactMeta[] }>(`/hunts/${id}/artifacts`),
+  artifactUrl: (id: string, artifactId: string) => `${ENGINE_URL}/hunts/${id}/artifacts/${artifactId}`,
   approvePlan: (id: string, body: ApprovePlanBody) =>
     post<CommandAccepted>(`/hunts/${id}/plan/approve`, body),
   // Shadow Hunt: estimate a team's cost/time before launching (v2). No spend, no events.

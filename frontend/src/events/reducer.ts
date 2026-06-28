@@ -90,6 +90,7 @@ export interface HuntView {
   finalArtifactId: string | null;
   totals: Record<string, unknown> | null;
   plan: PlanView | null;
+  forging: boolean; // v3: Howler is rendering the files — the "making the file" banner
 }
 
 export function initialHuntView(): HuntView {
@@ -105,6 +106,7 @@ export function initialHuntView(): HuntView {
     finalArtifactId: null,
     totals: null,
     plan: null,
+    forging: false,
   };
 }
 
@@ -398,6 +400,12 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
 
     case "artifact_created":
       return f(ev, "kind") === "final" ? { ...s, finalArtifactId: f(ev, "artifact_id") } : s;
+
+    case "forge_started":
+      return { ...s, forging: true, feed: feed(s, ev, "Making your files…") };
+
+    case "forge_completed":
+      return { ...s, forging: false, feed: feed(s, ev, "Your files are ready — PDF, DOCX, and more.") };
 
     case "hunt_completed": {
       const totals = f<Record<string, unknown>>(ev, "totals");

@@ -49,10 +49,18 @@ function toSources(raw: unknown): Source[] {
   });
 }
 
+interface Block {
+  text: string;
+  source_ids: number[];
+}
+
 export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: () => void }) {
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [formats, setFormats] = useState<{ artifact_id: string; kind: string }[]>([]);
+  const [active, setActive] = useState<number[] | null>(null); // highlighted source ids (trace)
   const [noSources, setNoSources] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -61,13 +69,20 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
       .getArtifact(huntId)
       .then((a) => {
         const content =
-          (a.content as { text?: string; sources?: unknown; no_sources?: boolean } | null) ?? {};
+          (a.content as
+            | { text?: string; sources?: unknown; no_sources?: boolean; blocks?: Block[] }
+            | null) ?? {};
         if (typeof content.text === "string" && content.text.trim()) {
           setDraft(stripDashes(content.text.trim()));
         }
         setSources(toSources(content.sources));
+        setBlocks(Array.isArray(content.blocks) ? content.blocks : []);
         setNoSources(Boolean(content.no_sources));
       })
+      .catch(() => {});
+    api
+      .getArtifacts(huntId)
+      .then((r) => setFormats(r.artifacts))
       .catch(() => {});
   }, [huntId]);
 
@@ -81,10 +96,19 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
       : "The Pack's brief";
   const body = firstIdx >= 0 ? lines.slice(firstIdx + 1).join("\n").trim() : "";
   const fullText = draft ?? "";
+  // Tagged body paragraphs (drop the leading "# Title" block) — each line traces to its sources.
+  const bodyBlocks = blocks.filter((b) => b.text && !b.text.startsWith("# "));
 
   function flash(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 1800);
+  }
+
+  // Click any line → trace it to its source(s): highlight them and scroll the first into view.
+  function traceBlock(ids: number[]) {
+    if (!ids.length) return;
+    setActive(ids);
+    document.getElementById(`src-${ids[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   return (
@@ -185,8 +209,48 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
           ) : (
             <>
               <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
-              <p className="text-[13px] text-[#71717a] mt-2 mb-6">Researched and drafted by Pack</p>
-              {draft ? (
+              <p className="text-[13px] text-[#71717a] mt-2 mb-5">Researched and drafted by Pack</p>
+              {formats.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {["md", "html", "pdf", "docx"]
+                    .map((k) => formats.find((f) => f.kind === k))
+                    .filter((f): f is { artifact_id: string; kind: string } => Boolean(f))
+                    .map((f) => (
+                      <a
+                        key={f.artifact_id}
+                        href={api.artifactUrl(huntId, f.artifact_id)}
+                        download
+                        className="rounded-md border border-[#2a2a2a] px-2.5 py-1 text-[12px] font-medium text-[#a1a1aa] no-underline hover:text-white hover:border-[#3a3a3a]"
+                        title={`Download the ${f.kind.toUpperCase()}`}
+                      >
+                        {f.kind.toUpperCase()}
+                      </a>
+                    ))}
+                </div>
+              )}
+              {bodyBlocks.length > 0 ? (
+                <div className="text-[15px] leading-7 text-[#d4d4d8] flex flex-col gap-3.5">
+                  {bodyBlocks.map((b, i) => {
+                    const cited = (b.source_ids ?? []).length > 0;
+                    const on = Boolean(active && cited && b.source_ids.some((n) => active.includes(n)));
+                    return (
+                      <p
+                        key={i}
+                        onClick={() => traceBlock(b.source_ids ?? [])}
+                        className={`m-0 -mx-2 rounded px-2 py-1 transition-colors ${
+                          cited ? "cursor-pointer" : ""
+                        } ${on ? "bg-[#1c1c1c]" : cited ? "hover:bg-[#161616]" : ""}`}
+                        title={cited ? `Traces to source ${b.source_ids.join(", ")}` : "No cited source"}
+                      >
+                        {b.text}
+                        {cited && (
+                          <sup className="ml-1 text-[11px] text-[#5b9bd5]">[{b.source_ids.join(",")}]</sup>
+                        )}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : draft ? (
                 <div className="text-[15px] leading-7 text-[#d4d4d8]">
                   <MarkdownReply text={body} />
                 </div>
@@ -199,7 +263,13 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
               <h2 className="text-[15px] font-medium m-0 mb-3">Sources</h2>
               <ol className="m-0 pl-5 flex flex-col gap-2.5">
                 {sources.map((s) => (
-                  <li key={s.n} className="text-[13px] leading-snug">
+                  <li
+                    key={s.n}
+                    id={`src-${s.n}`}
+                    className={`-mx-2 rounded px-2 py-1 text-[13px] leading-snug transition-colors ${
+                      active?.includes(s.n) ? "bg-[#1c1c1c] ring-1 ring-[#5b9bd5]/40" : ""
+                    }`}
+                  >
                     {s.url ? (
                       <a
                         href={s.url}

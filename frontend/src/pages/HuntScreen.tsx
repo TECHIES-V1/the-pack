@@ -121,6 +121,12 @@ export function HuntScreen() {
         {/* Center: the Territory, always mounted. On the Return the brief pops up over it. */}
         <div className="relative flex-1 m-2 rounded-[12px] overflow-hidden border border-[#2a2a2a] bg-[#0F0F0F]">
           <Territory view={view} />
+          {view.forging && !returned && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-full bg-[#1A1A1A] border border-[#2a2a2a] px-3.5 py-1.5 text-[12px] text-[#e4e4e7] shadow-lg">
+              <span className="h-2 w-2 rounded-full bg-[#2dd4bf] animate-pulse" />
+              Making your files…
+            </div>
+          )}
           {returned && !briefOpen && (
             <button
               onClick={() => setBriefOpen(true)}

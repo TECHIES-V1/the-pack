@@ -122,6 +122,18 @@ describe("reducer narration (the chat feed)", () => {
   it("keeps per-search noise out of the chat", () => {
     expect(feedTexts([ev("tool_called", { wolf_id: "scout-1", tool: "web_search", args_summary: "x" }, 1)])).toHaveLength(0);
   });
+
+  it("raises and clears the 'making the file' banner over the Forge (v3)", () => {
+    const mid = reduceAll([ev("forge_started", { formats: ["md", "pdf"] }, 1)]);
+    expect(mid.forging).toBe(true);
+    expect(mid.feed.map((f) => f.text)).toContain("Making your files…");
+
+    const done = reduceAll([
+      ev("forge_started", { formats: ["md", "pdf"] }, 1),
+      ev("forge_completed", { formats: ["md", "pdf"], artifact_ids: ["a1", "a2"] }, 2),
+    ]);
+    expect(done.forging).toBe(false);
+  });
 });
 
 describe("reducer v2 — team, clones, the Doctor", () => {
