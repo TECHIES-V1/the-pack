@@ -62,6 +62,12 @@ export function SettingsModal({ onClose }: { onClose?: () => void }) {
     }
     useChatStore.getState().reset();
     setCustomInstructions("");
+    // v-fix E1: "your data" must include the SERVER side — wipe the knowledge base + memory too,
+    // not just localStorage (this is a local-only product).
+    api.clearDocuments().catch(() => {});
+    api.clearMemory().catch(() => {});
+    setDocs([]);
+    setSpend(null);
     dismiss();
   }
 
@@ -177,8 +183,8 @@ export function SettingsModal({ onClose }: { onClose?: () => void }) {
           <section className="flex flex-col gap-3">
             <h3 className="text-[13px] font-medium m-0">Your data</h3>
             <p className="text-[12px] text-[#a1a1aa] m-0">
-              Pack does not train on your conversations. Everything here lives in this browser only —
-              there's no account.
+              Pack does not train on your conversations. Everything lives on this device only — no
+              account. "Clear all" also wipes your knowledge base and the pack's memory.
             </p>
             <div className="flex flex-wrap gap-2">
               <button

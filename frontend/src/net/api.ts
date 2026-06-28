@@ -289,6 +289,8 @@ export const api = {
     return postForm<KbDoc>("/documents", form);
   },
   deleteDocument: (id: number) => del<{ id: number; deleted: boolean }>(`/documents/${id}`),
+  clearDocuments: () => del<{ cleared: boolean }>("/documents"),
+  clearMemory: () => del<{ cleared: boolean }>("/memory"),
   listInstincts: () => req<{ instincts: Instinct[] }>("/instincts"),
   saveInstinct: (label: string, spec: Record<string, unknown>) =>
     post<{ instinct_id: string; accepted: boolean }>("/instincts", { label, spec }),
@@ -296,7 +298,6 @@ export const api = {
     req<{ hunt_id: string; events: unknown[]; redacted: boolean }>(
       `/hunts/${id}/tracks/export`,
     ),
-  signedUpload: () => post<{ upload_url: string; object_key: string }>("/uploads"),
   submitFeedback: (huntId: string, turnIndex: number, vote: "up" | "down") =>
     post<{ ok: boolean }>(`/hunts/${huntId}/feedback`, { turn_index: turnIndex, vote }),
 };

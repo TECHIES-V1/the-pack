@@ -962,6 +962,13 @@ async def get_memory(request: Request) -> dict:
     }
 
 
+@app.delete("/memory", tags=["memory"])
+async def clear_memory_route(request: Request) -> JSONResponse:
+    """Forget everything the pack learned (wired to Settings → Clear all saved data)."""
+    await _repo(request).clear_memory()
+    return JSONResponse({"cleared": True})
+
+
 # --- spend (v5.4): total cost across hunts ---------------------------------------------
 
 
@@ -1009,6 +1016,13 @@ async def add_document(request: Request, file: UploadFile = File(...)) -> JSONRe
 async def list_documents_route(request: Request) -> dict:
     """Your knowledge-base documents (metadata only, no full text)."""
     return {"documents": await _repo(request).list_documents()}
+
+
+@app.delete("/documents", tags=["documents"])
+async def clear_documents_route(request: Request) -> JSONResponse:
+    """Wipe the whole knowledge base (wired to Settings → Clear all saved data)."""
+    await _repo(request).clear_documents()
+    return JSONResponse({"cleared": True})
 
 
 @app.delete("/documents/{doc_id}", tags=["documents"])

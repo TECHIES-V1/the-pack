@@ -444,6 +444,12 @@ class Repo:
     async def delete_document(self, doc_id: int) -> None:
         await self._pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
 
+    async def clear_documents(self) -> None:
+        await self._pool.execute("DELETE FROM documents")
+
+    async def clear_memory(self) -> None:
+        await self._pool.execute("DELETE FROM memory")
+
     # --- spend (v5.4): real cost per hunt, read from the hunt_completed totals ----------
 
     async def spend_by_hunt(self) -> dict[str, float]:

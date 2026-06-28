@@ -46,6 +46,12 @@ class FakeRepo:
     async def delete_document(self, doc_id: int) -> None:
         self.documents = [d for d in self.documents if d["id"] != doc_id]
 
+    async def clear_documents(self) -> None:
+        self.documents = []
+
+    async def clear_memory(self) -> None:
+        self.memory = []
+
     async def create_hunt(
         self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"
     ) -> None:
