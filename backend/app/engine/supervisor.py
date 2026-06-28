@@ -171,7 +171,8 @@ _INTENT_INSTRUCTIONS: dict[str, str] = {
         "topic, fewer for a narrow one); a `queries` array with ONE plain-keyword search query per "
         "scout (match the scout count); an `assumptions` array; and numeric `est_cost` (USD) and "
         "`est_time` (seconds). Queries: plain keywords only — NO operators (site:, OR/AND, quotes, "
-        "'past week'); the engine handles recency."
+        "'past week'); the engine handles recency. Keep each query BROAD enough to return results — "
+        "2-5 common head keywords (the topic plus ONE facet), not a hyper-specific phrase."
     ),
     "search": (
         "Using ONLY the search results provided, summarize the key findings for your angle. "
