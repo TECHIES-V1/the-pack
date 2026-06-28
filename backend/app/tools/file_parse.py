@@ -51,6 +51,8 @@ def detect_kind(filename: str, content_type: str = "") -> str:
     ct = (content_type or "").lower()
     if name.endswith(".pdf") or "pdf" in ct:
         return "pdf"
+    if name.endswith((".docx", ".doc")) or "wordprocessingml" in ct or "msword" in ct:
+        return "docx"
     if name.endswith(".csv") or "csv" in ct:
         return "csv"
     if name.endswith((".md", ".markdown")):
@@ -66,9 +68,35 @@ def parse_bytes(data: bytes, kind: str) -> str:
     """Extract plain text from raw bytes by kind. Never raises — returns a note on failure."""
     if kind == "pdf":
         return _parse_pdf(data)
+    if kind == "docx":
+        return _parse_docx(data)
     if kind == "csv":
         return _parse_csv(data)
     return data.decode("utf-8", errors="replace")[:MAX_CHARS].strip()
+
+
+def _parse_docx(data: bytes) -> str:
+    """Read a .docx (OOXML) into text via python-docx. A legacy binary .doc isn't OOXML and will
+    fail here — we say so honestly rather than emit mojibake."""
+    try:
+        from docx import Document
+    except Exception:  # noqa: BLE001 - degrade gracefully if the dep is missing
+        return "[docx parsing unavailable — python-docx not installed]"
+    try:
+        doc = Document(io.BytesIO(data))
+    except Exception:  # noqa: BLE001 - not a valid .docx (e.g. an old binary .doc)
+        return "[could not read the document — save it as .docx, PDF, or text]"
+    parts: list[str] = []
+    total = 0
+    for para in doc.paragraphs:
+        text = (para.text or "").strip()
+        if not text:
+            continue
+        parts.append(text)
+        total += len(text)
+        if total > MAX_CHARS:
+            break
+    return "\n".join(parts).strip()[:MAX_CHARS]
 
 
 def _parse_pdf(data: bytes) -> str:
