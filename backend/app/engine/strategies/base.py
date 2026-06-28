@@ -134,6 +134,27 @@ GAPS_SCHEMA: dict = {
     "properties": {"gaps": {"type": "array", "items": {"type": "string"}}},
 }
 
+# v2: Howler writes the brief as TAGGED BLOCKS so every line carries its sources (the gate for
+# click-any-line → source). `source_ids` index the numbered source list given in the draft context.
+DRAFT_SCHEMA: dict = {
+    "type": "object",
+    "required": ["title", "blocks"],
+    "properties": {
+        "title": {"type": "string"},
+        "blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "source_ids": {"type": "array", "items": {"type": "integer"}},
+                },
+            },
+        },
+    },
+}
+
 
 # --- the engine surface a strategy drives -------------------------------------------------
 

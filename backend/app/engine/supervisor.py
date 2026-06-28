@@ -36,6 +36,7 @@ from app.engine.ids import new_artifact_id, new_checkpoint_id, new_hold_id, new_
 from app.engine.strategies import Conflict, CritiqueResult, Finding, Merged, get_strategy
 from app.engine.strategies.base import (
     CRITIQUE_SCHEMA,
+    DRAFT_SCHEMA,
     FINDINGS_SCHEMA,
     GAPS_SCHEMA,
     MERGE_SCHEMA,
@@ -177,8 +178,11 @@ _INTENT_INSTRUCTIONS: dict[str, str] = {
         "(array of focused follow-up search queries). Empty array if nothing is missing."
     ),
     "draft": (
-        "Write the final briefing in clear prose, citing the sources inline. Build on the merged "
-        "claims and honor the resolved decision if one is given."
+        "Write the final briefing as ONLY JSON: a `title` and a `blocks` array. Each block is "
+        "{text, source_ids} — `text` is one paragraph of clear prose, `source_ids` are the NUMBERS "
+        "of the sources (from the numbered Sources list) that back that paragraph. Cite real sources "
+        "only; if a paragraph isn't supported by a listed source, leave its source_ids empty. Build "
+        "on the merged claims and honor the resolved decision if one is given."
     ),
     "standoff_challenge": (
         "You are challenging a weak claim. In one or two sentences, state plainly why it doesn't "
@@ -249,6 +253,7 @@ class Supervisor:
         self._search_attempts = 0  # v2: web searches run (to tell "no results" from "search down")
         self._search_ok = 0  # v2: web searches that succeeded
         self._no_sources = False  # v2: the hunt found no traceable ground — never fabricate
+        self._blocks: list[dict] = []  # v3: Howler's tagged blocks [{text, source_ids}] for trace
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -880,7 +885,9 @@ class Supervisor:
                     "confidence": 0.0,
                 },
             )
-            return _SEARCH_UNAVAILABLE_NOTE if unavailable else _NO_SOURCES_NOTE
+            note = _SEARCH_UNAVAILABLE_NOTE if unavailable else _NO_SOURCES_NOTE
+            self._blocks = [{"text": note, "source_ids": []}]
+            return note
         if self._mode == "on_command":
             await self._confirm_draft()
         howler = self._wolves["howler"]
@@ -890,28 +897,74 @@ class Supervisor:
             {"step_id": step_id, "wolf_id": "howler", "summary": "Drafting the briefing with citations"},
         )
         await self.progress("howler", "writing", "Drafting the briefing")
-        res = await self._dispatch(howler, "draft", context=self._draft_context(merged, decision), phase="writing")
+        res = await self._dispatch(
+            howler,
+            "draft",
+            context=self._draft_context(merged, decision),
+            phase="writing",
+            response_schema=DRAFT_SCHEMA,
+        )
+        self._blocks = self._blocks_from(res, self._dedupe_sources(merged.sources))
         await self._emit(
             "step_completed",
             "howler",
             {"step_id": step_id, "wolf_id": "howler", "output_ref": f"art_{self._hunt_id}_draft", "confidence": 0.86},
         )
-        return res.text or merged.summary
+        return "\n\n".join(b["text"] for b in self._blocks) or res.text or merged.summary
+
+    def _blocks_from(self, res: CompletionResult, sources: list[dict]) -> list[dict]:
+        """Normalize Howler's tagged output into [{text, source_ids}] blocks. Falls back to wrapping
+        free text as one block (all sources) if the model didn't return structured blocks."""
+        parsed = res.parsed or {}
+        out: list[dict] = []
+        title = str(parsed.get("title") or "").strip()
+        if title:
+            out.append({"text": f"# {title}", "source_ids": []})
+        for b in parsed.get("blocks") or []:
+            if not isinstance(b, dict):
+                continue
+            text = str(b.get("text") or "").strip()
+            if not text:
+                continue
+            ids = [
+                int(i)
+                for i in (b.get("source_ids") or [])
+                if isinstance(i, int | float) and 1 <= int(i) <= len(sources)
+            ]
+            out.append({"text": text, "source_ids": sorted(set(ids))})
+        if not any(b["text"] and not b["text"].startswith("# ") for b in out):
+            # No real body blocks — wrap whatever free text came back, crediting all sources.
+            out.append(
+                {"text": (res.text or "").strip(), "source_ids": list(range(1, len(sources) + 1))}
+            )
+        return out
 
     async def finish(self, draft_text: str, merged: Merged) -> None:
         """Save the final artifact + a provenance span map, then close the hunt."""
         artifact_id = new_artifact_id()
         sources = self._dedupe_sources(merged.sources)
+        blocks = self._blocks or [{"text": draft_text, "source_ids": []}]
 
-        # B3 — a real (coarse) provenance map: each claim → the sources that back it.
+        # v3 — a BLOCK-LEVEL provenance map: each block → its exact sources (the click-any-line
+        # → source gate). Replaces the coarse claim map.
         spanmap_ref: str | None = None
-        if merged.claims and sources:
+        if any(b.get("source_ids") for b in blocks):
             spanmap_ref = new_artifact_id()
             spans = [
-                {"claim": c, "source_refs": [s.get("url", "") for s in sources[:3] if s.get("url")]}
-                for c in merged.claims
+                {
+                    "block": i,
+                    "source_ids": b.get("source_ids", []),
+                    "source_refs": [
+                        sources[j - 1].get("url", "")
+                        for j in b.get("source_ids", [])
+                        if 1 <= j <= len(sources)
+                    ],
+                }
+                for i, b in enumerate(blocks)
             ]
-            await self._repo.save_artifact(spanmap_ref, self._hunt_id, "spanmap", "howler", {"spans": spans})
+            await self._repo.save_artifact(
+                spanmap_ref, self._hunt_id, "provenance_map", "howler", {"spans": spans}
+            )
 
         await self._repo.save_artifact(
             artifact_id,
@@ -920,6 +973,7 @@ class Supervisor:
             "howler",
             {
                 "text": draft_text,
+                "blocks": blocks,  # v3: tagged blocks for click-any-line → source
                 "claims": merged.claims,
                 "sources": sources,
                 "span_map_ref": spanmap_ref,
@@ -1244,9 +1298,11 @@ class Supervisor:
             parts.append(f"Resolved decision: {decision}")
         sources = self._dedupe_sources(merged.sources)
         if sources:
-            parts.append(
-                "Sources:\n" + "\n".join(f"- {s.get('title', '')}: {s.get('url', '')}" for s in sources[:8])
+            numbered = "\n".join(
+                f"[{i + 1}] {s.get('title', '') or s.get('url', '')} — {s.get('url', '')}"
+                for i, s in enumerate(sources)
             )
+            parts.append(f"Sources (cite each block by number):\n{numbered}")
         block = self._extra_inputs_block()
         if block:
             parts.append(block.strip())

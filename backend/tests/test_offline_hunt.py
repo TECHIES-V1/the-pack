@@ -241,6 +241,29 @@ async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> 
     assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
 
 
+async def test_offline_draft_is_tagged_with_provenance() -> None:
+    """v3 (3.2): the final brief carries tagged blocks + a block-level provenance map for tracing."""
+    repo = FakeRepo()
+    hunt_id = "hunt_prov"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    blocks = final["content"]["blocks"]
+    assert blocks and all("text" in b and "source_ids" in b for b in blocks)
+    assert any(b["source_ids"] for b in blocks), "at least one block cites a source"
+
+    prov = next(a for a in repo.artifacts if a["kind"] == "provenance_map")
+    assert prov["content"]["spans"]
+    assert final["content"]["span_map_ref"] == prov["artifact_id"]
+
+
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])
 async def test_offline_topic_awareness(strategy: str) -> None:
     """The hunt is topic-aware: the scouts' real queries mention the task, not a hardcoded demo."""
