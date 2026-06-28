@@ -30,6 +30,8 @@ export type EventType =
   | "boundary_downgrade"
   | "boundary_halt"
   | "artifact_created"
+  | "forge_started"
+  | "forge_completed"
   | "hunt_completed"
   | "hunt_failed"
   | "hunt_stopped"

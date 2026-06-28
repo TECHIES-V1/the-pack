@@ -43,6 +43,8 @@
     { "if": { "properties": { "type": { "const": "boundary_downgrade" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_downgrade" } } } },
     { "if": { "properties": { "type": { "const": "boundary_halt" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_halt" } } } },
     { "if": { "properties": { "type": { "const": "artifact_created" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/artifact_created" } } } },
+    { "if": { "properties": { "type": { "const": "forge_started" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/forge_started" } } } },
+    { "if": { "properties": { "type": { "const": "forge_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/forge_completed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_completed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_failed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_failed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_stopped" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_stopped" } } } },
@@ -62,6 +64,7 @@
         "doctor_dispatched", "doctor_healed",
         "boundary_warning", "boundary_downgrade", "boundary_halt",
         "artifact_created",
+        "forge_started", "forge_completed",
         "hunt_completed", "hunt_failed", "hunt_stopped",
         "benchmark_started", "benchmark_completed"
       ]
@@ -184,7 +187,7 @@
         "required": ["wolf_id", "phase", "text"],
         "properties": {
           "wolf_id": { "type": "string" },
-          "phase": { "enum": ["thinking", "searching", "reading", "merging", "writing", "critiquing"] },
+          "phase": { "enum": ["thinking", "searching", "reading", "merging", "writing", "critiquing", "forge"] },
           "text": { "type": "string" },
           "tokens": { "type": ["integer", "null"] }
         }
@@ -340,9 +343,24 @@
         "required": ["artifact_id", "kind", "produced_by"],
         "properties": {
           "artifact_id": { "type": "string" },
-          "kind": { "enum": ["draft", "final", "scorecard", "transcript"] },
+          "kind": { "enum": ["draft", "final", "scorecard", "transcript", "md", "html", "pdf", "docx", "provenance_map"] },
           "produced_by": { "type": "string" },
           "provenance_span_map_ref": { "type": ["string", "null"] }
+        }
+      },
+      "forge_started": {
+        "type": "object",
+        "description": "v2: the Forge began turning the brief into real files.",
+        "required": ["formats"],
+        "properties": { "formats": { "type": "array", "items": { "type": "string" } } }
+      },
+      "forge_completed": {
+        "type": "object",
+        "description": "v2: the Forge finished rendering the files.",
+        "required": ["formats"],
+        "properties": {
+          "formats": { "type": "array", "items": { "type": "string" } },
+          "artifact_ids": { "type": "array", "items": { "type": "string" } }
         }
       },
       "hunt_completed": {
