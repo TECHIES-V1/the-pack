@@ -34,13 +34,17 @@ interface Route {
   view: View;
   huntId: string | null;
   token?: string;
+  focus?: string; // v5.6: a wolf id to highlight in Tracks (deep-link from a brief line)
 }
 
 function parseRoute(): Route {
   const path = window.location.pathname.replace(/^\//, "");
   if (path.startsWith("hunt/")) {
     const [id, sub] = path.slice("hunt/".length).split("/");
-    if (sub === "tracks") return { view: "tracks", huntId: id };
+    if (sub === "tracks") {
+      const focus = new URLSearchParams(window.location.hash.slice(1)).get("wolf") ?? undefined;
+      return { view: "tracks", huntId: id, focus };
+    }
     if (sub === "scorecard") return { view: "scorecard", huntId: id };
     return { view: "hunt", huntId: id }; // /hunt/:id and /hunt/:id/plan
   }
@@ -116,7 +120,7 @@ export default function App() {
   let page: React.ReactNode;
   if (route.view === "door") page = <DoorPage />;
   else if (route.view === "hunt") page = <HuntScreen />;
-  else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} />;
+  else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} focusWolf={route.focus} />;
   else if (route.view === "scorecard") page = <ScorecardPage huntId={route.huntId ?? ""} />;
   else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
   else if (route.view === "library") page = <LibraryPage />;

@@ -961,6 +961,24 @@ async def get_memory(request: Request) -> dict:
     }
 
 
+# --- spend (v5.4): total cost across hunts ---------------------------------------------
+
+
+@app.get("/spend", tags=["hunts"])
+async def get_spend(request: Request) -> dict:
+    """Total spend across all hunts + a per-hunt breakdown, read from each hunt's final totals."""
+    repo = _repo(request)
+    by_hunt = await repo.spend_by_hunt()
+    titles = {h["hunt_id"]: h["title"] for h in await repo.list_hunts()}
+    items = [
+        {"hunt_id": hid, "title": titles.get(hid, hid), "cost_usd": round(cost, 4)}
+        for hid, cost in by_hunt.items()
+        if cost > 0
+    ]
+    items.sort(key=lambda x: x["cost_usd"], reverse=True)
+    return {"total_usd": round(sum(i["cost_usd"] for i in items), 4), "hunts": items}
+
+
 # --- knowledge base (your documents, v4.2) ---------------------------------------------
 
 

@@ -2,7 +2,7 @@
 // the engine (GET /hunts/:id/tracks/export) and lays it out as a timeline with the spend total
 // and the moments that matter (Standoffs, Strays, the Boundary).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LuX } from "react-icons/lu";
 import { api } from "@/net/api";
 import type { PackEvent } from "@/events/types";
@@ -49,9 +49,10 @@ const ACCENT: Record<string, string> = {
   hunt_completed: "text-[#3fb27f]",
 };
 
-export function TracksPage({ huntId }: { huntId: string }) {
+export function TracksPage({ huntId, focusWolf }: { huntId: string; focusWolf?: string }) {
   const [events, setEvents] = useState<PackEvent[]>([]);
   const [error, setError] = useState(false);
+  const firstHit = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
     api
@@ -59,6 +60,11 @@ export function TracksPage({ huntId }: { huntId: string }) {
       .then((r) => setEvents((r.events as PackEvent[]) ?? []))
       .catch(() => setError(true));
   }, [huntId]);
+
+  // v5.6: when deep-linked from a brief line, scroll the focused wolf's first event into view.
+  useEffect(() => {
+    if (focusWolf && events.length) firstHit.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusWolf, events]);
 
   const spend = [...events].reverse().find((e) => e.type === "tokens_spent");
   const cumulative = spend ? Number(spend.payload.cumulative_usd ?? 0) : 0;
@@ -82,16 +88,34 @@ export function TracksPage({ huntId }: { huntId: string }) {
 
           {error && <p className="text-[#e03a2f] text-[13px]">Couldn't load the log — is the engine running?</p>}
 
+          {focusWolf && (
+            <p className="text-[12px] text-[#5b9bd5] m-0">
+              Tracing <span className="font-mono">{focusWolf}</span> — its steps are highlighted below.
+            </p>
+          )}
+
           <ol className="m-0 p-0 list-none flex flex-col">
-            {events.map((e) => (
-              <li key={e.seq} className="flex items-baseline gap-3 py-1.5 border-b border-[#1f1f1f]">
-                <span className="text-[11px] text-[#52525b] font-mono w-8 shrink-0">{e.seq}</span>
-                <span className="text-[12px] text-[#71717a] w-20 shrink-0">{e.actor}</span>
-                <span className={`text-[13px] ${ACCENT[e.type] ?? "text-[#d4d4d8]"}`}>
-                  {NOTE[e.type] ?? e.type}
-                </span>
-              </li>
-            ))}
+            {events.map((e, i) => {
+              const hit = !!focusWolf && e.actor === focusWolf;
+              const isFirstHit = hit && events.findIndex((x) => x.actor === focusWolf) === i;
+              return (
+                <li
+                  key={e.seq}
+                  ref={isFirstHit ? firstHit : undefined}
+                  className={`flex items-baseline gap-3 py-1.5 border-b border-[#1f1f1f] ${
+                    hit ? "bg-[#5b9bd5]/10 -mx-2 px-2 rounded" : ""
+                  }`}
+                >
+                  <span className="text-[11px] text-[#52525b] font-mono w-8 shrink-0">{e.seq}</span>
+                  <span className={`text-[12px] w-20 shrink-0 ${hit ? "text-[#5b9bd5]" : "text-[#71717a]"}`}>
+                    {e.actor}
+                  </span>
+                  <span className={`text-[13px] ${ACCENT[e.type] ?? "text-[#d4d4d8]"}`}>
+                    {NOTE[e.type] ?? e.type}
+                  </span>
+                </li>
+              );
+            })}
           </ol>
         </div>
       </div>

@@ -278,6 +278,9 @@ export const api = {
   },
   // v4.1: what the pack remembers across hunts (the Elder's takeaways), most recent first.
   getMemory: () => req<{ memory: { text: string; hunt_id: string | null }[] }>("/memory"),
+  // v5.4: total spend across hunts + per-hunt breakdown.
+  getSpend: () =>
+    req<{ total_usd: number; hunts: { hunt_id: string; title: string; cost_usd: number }[] }>("/spend"),
   // v4.2: your local knowledge base — documents the pack researches alongside the web.
   listDocuments: () => req<{ documents: KbDoc[] }>("/documents"),
   addDocument: (file: File) => {

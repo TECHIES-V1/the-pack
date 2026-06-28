@@ -19,8 +19,15 @@ export function SettingsModal({ onClose }: { onClose?: () => void }) {
   const [kbError, setKbError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Spend across hunts (v5.4) — local tally from each hunt's final totals.
+  const [spend, setSpend] = useState<{
+    total_usd: number;
+    hunts: { hunt_id: string; title: string; cost_usd: number }[];
+  } | null>(null);
+
   useEffect(() => {
     api.listDocuments().then((r) => setDocs(r.documents)).catch(() => {});
+    api.getSpend().then(setSpend).catch(() => {});
   }, []);
 
   async function uploadDoc(file: File) {
@@ -138,6 +145,33 @@ export function SettingsModal({ onClose }: { onClose?: () => void }) {
               </ul>
             )}
           </section>
+
+          {/* Spend across hunts */}
+          {spend && (
+            <section className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between">
+                <h3 className="text-[13px] font-medium m-0">Spend</h3>
+                <span className="text-[13px] text-white tabular-nums">
+                  ${spend.total_usd.toFixed(4)} <span className="text-[#71717a]">all hunts</span>
+                </span>
+              </div>
+              {spend.hunts.length === 0 ? (
+                <p className="text-[12px] text-[#71717a] m-0">No spend yet — your hunts are free so far.</p>
+              ) : (
+                <ul className="m-0 p-0 list-none flex flex-col gap-1">
+                  {spend.hunts.slice(0, 6).map((h) => (
+                    <li
+                      key={h.hunt_id}
+                      className="flex items-center justify-between gap-3 text-[12px] text-[#a1a1aa]"
+                    >
+                      <span className="truncate">{h.title}</span>
+                      <span className="tabular-nums shrink-0">${h.cost_usd.toFixed(4)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {/* Data controls */}
           <section className="flex flex-col gap-3">

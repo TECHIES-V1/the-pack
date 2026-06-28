@@ -297,6 +297,18 @@ export function DocumentView({
                       — {s.by}
                       {s.verified ? " · read in full" : " · flagged unverified"}
                     </span>
+                    {s.by && s.by.startsWith("scout") && (
+                      <a
+                        href={`/hunt/${huntId}/tracks#wolf=${encodeURIComponent(s.by)}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          goTo(`/hunt/${huntId}/tracks#wolf=${encodeURIComponent(s.by)}`);
+                        }}
+                        className="ml-1.5 text-[11px] text-[#52525b] hover:text-[#5b9bd5] no-underline"
+                      >
+                        → Tracks
+                      </a>
+                    )}
                     {s.snippet && <p className="text-[12px] text-[#71717a] m-0 mt-1">{s.snippet}</p>}
                   </li>
                 ))}

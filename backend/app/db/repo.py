@@ -444,6 +444,18 @@ class Repo:
     async def delete_document(self, doc_id: int) -> None:
         await self._pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
 
+    # --- spend (v5.4): real cost per hunt, read from the hunt_completed totals ----------
+
+    async def spend_by_hunt(self) -> dict[str, float]:
+        rows = await self._pool.fetch(
+            "SELECT hunt_id, payload FROM events WHERE type = 'hunt_completed' ORDER BY seq"
+        )
+        out: dict[str, float] = {}
+        for r in rows:
+            totals = (r["payload"] or {}).get("totals") or {}
+            out[r["hunt_id"]] = float(totals.get("cost_usd") or 0)
+        return out
+
     # --- checkpoints (stub now; resume logic NEXT) -------------------------------------
 
     async def save_checkpoint(
