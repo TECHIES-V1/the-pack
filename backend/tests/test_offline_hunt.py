@@ -409,11 +409,16 @@ async def test_offline_forge_renders_real_files() -> None:
     await asyncio.wait_for(sup.run(), timeout=15)
 
     kinds = {a["kind"] for a in repo.artifacts}
-    assert {"md", "html", "pdf", "docx"} <= kinds
-    pdf = next(a for a in repo.artifacts if a["kind"] == "pdf")
-    assert b64.b64decode(pdf["content"]["b64"]).startswith(b"%PDF")  # a real PDF
-    docx = next(a for a in repo.artifacts if a["kind"] == "docx")
-    assert b64.b64decode(docx["content"]["b64"]).startswith(b"PK")  # a real .docx (zip)
+    assert {"md", "html", "pdf", "docx", "xlsx", "pptx", "png"} <= kinds  # v5.8: broader formats
+
+    def body(kind: str) -> bytes:
+        return b64.b64decode(next(a for a in repo.artifacts if a["kind"] == kind)["content"]["b64"])
+
+    assert body("pdf").startswith(b"%PDF")  # a real PDF
+    assert body("docx").startswith(b"PK")  # docx/xlsx/pptx are OOXML zips
+    assert body("xlsx").startswith(b"PK")
+    assert body("pptx").startswith(b"PK")
+    assert body("png").startswith(b"\x89PNG")  # a real PNG
     types = [e.type for e in repo.all_events(hunt_id)]
     assert "forge_started" in types and "forge_completed" in types
 

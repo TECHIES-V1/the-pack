@@ -186,12 +186,10 @@ export function DoorPage() {
   // launches when there's a real task (the normal clarify-gate). It is NOT a forced hunt.
   async function parseAttachment(file: File) {
     const t = file.type;
-    if (t.startsWith("video/")) {
-      addAlpha("I can't read video yet — try an image, PDF, doc, spreadsheet, or audio file.");
-      return;
-    }
     try {
-      const parsed = t.startsWith("audio/") ? await api.transcribe(file) : await api.parse(file);
+      // Audio and video both go through transcription (a video's audio track is pulled server-side).
+      const useTranscribe = t.startsWith("audio/") || t.startsWith("video/");
+      const parsed = useTranscribe ? await api.transcribe(file) : await api.parse(file);
       const text = (parsed.text || "").trim();
       if (!text) {
         addAlpha(`I couldn't pull any text out of ${file.name} — tell me what's in it.`);

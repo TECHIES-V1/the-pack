@@ -29,6 +29,7 @@ from app.tools.file_parse import detect_kind, parse_bytes, parse_url
 from app.tools.redact import redact_event
 from app.tools.vision import describe_image
 from app.tools.transcribe import TRANSCRIBER
+from app.tools.video import extract_audio
 
 from app.bus.redis_stream import EventBus
 from app.config import settings
@@ -915,7 +916,7 @@ async def get_artifact(hunt_id: str, request: Request) -> JSONResponse:
     return JSONResponse(content=artifact)
 
 
-_DOWNLOADABLE = {"md", "html", "pdf", "docx"}
+_DOWNLOADABLE = {"md", "html", "pdf", "docx", "xlsx", "pptx", "png"}
 
 
 @app.get("/hunts/{hunt_id}/artifacts", tags=["hunts"])
@@ -990,12 +991,16 @@ async def add_document(request: Request, file: UploadFile = File(...)) -> JSONRe
     if kind == "image":
         text = await describe_image(data, file.content_type or "", file.filename or "")
     elif kind == "video":
-        return JSONResponse(status_code=400, content={"detail": "video can't go in the knowledge base"})
+        return JSONResponse(
+            status_code=400, content={"detail": "video can't go in the knowledge base"}
+        )
     else:
         text = parse_bytes(data, kind)
     text = (text or "").strip()
     if not text:
-        return JSONResponse(status_code=400, content={"detail": "couldn't read any text from that file"})
+        return JSONResponse(
+            status_code=400, content={"detail": "couldn't read any text from that file"}
+        )
     doc_id = await _repo(request).save_document(file.filename or "document", kind, text)
     return _accepted({"id": doc_id, "name": file.filename, "kind": kind, "chars": len(text)})
 
@@ -1044,8 +1049,11 @@ async def parse_document(
         kind = detect_kind(file.filename or "", file.content_type or "")
         if kind == "image":
             text = await describe_image(data, file.content_type or "", file.filename or "")
-        elif kind == "video":
-            text = "[video isn't supported yet — try an image, PDF, doc, spreadsheet, or audio file]"
+        elif kind == "video":  # v5.7: pull the audio track and transcribe it
+            audio = await extract_audio(data)
+            text = ""
+            if audio:
+                text = (await TRANSCRIBER.transcribe(audio, content_type="audio/mpeg")).text
         else:
             text = parse_bytes(data, kind)
         return JSONResponse({"kind": kind, "text": text, "chars": len(text), "filename": file.filename})
@@ -1054,10 +1062,18 @@ async def parse_document(
 
 @app.post("/transcribe", tags=["hunts"])
 async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
-    """Transcribe uploaded audio into text (for a NEW hunt from voice). The frontend then calls
-    createHunt with the transcript. Offline returns a deterministic placeholder."""
+    """Transcribe uploaded audio (or a VIDEO's audio track, v5.7) into text for a new hunt. The
+    frontend then calls createHunt with the transcript. Offline returns a placeholder."""
     data = await file.read()
-    t = await TRANSCRIBER.transcribe(data, content_type=file.content_type or "")
+    content_type = file.content_type or ""
+    if detect_kind(file.filename or "", content_type) == "video":
+        audio = await extract_audio(data)
+        if not audio:
+            return JSONResponse(
+                status_code=400, content={"detail": "couldn't pull audio from that video"}
+            )
+        data, content_type = audio, "audio/mpeg"
+    t = await TRANSCRIBER.transcribe(data, content_type=content_type)
     return JSONResponse({"text": t.text, "provider": t.provider, "duration_s": t.duration_s})
 
 

@@ -222,7 +222,7 @@ export function DocumentView({
               <p className="text-[13px] text-[#71717a] mt-2 mb-5">Researched and drafted by Pack</p>
               {formats.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-6">
-                  {["md", "html", "pdf", "docx"]
+                  {["md", "html", "pdf", "docx", "xlsx", "pptx", "png"]
                     .map((k) => formats.find((f) => f.kind === k))
                     .filter((f): f is { artifact_id: string; kind: string } => Boolean(f))
                     .map((f) => (
