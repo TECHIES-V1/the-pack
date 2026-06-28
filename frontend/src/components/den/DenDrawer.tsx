@@ -107,14 +107,16 @@ export function DenDrawer() {
   }
 
   function archive(h: HuntListItem) {
+    const prev = hunts;
     setHunts((hs) => hs.filter((x) => x.hunt_id !== h.hunt_id));
-    api.patchHunt(h.hunt_id, { archived: true }).catch(() => {});
+    api.patchHunt(h.hunt_id, { archived: true }).catch(() => setHunts(prev));
   }
 
   function remove(h: HuntListItem) {
     if (!window.confirm(`Delete "${h.title}"? This can't be undone.`)) return;
+    const prev = hunts;
     setHunts((hs) => hs.filter((x) => x.hunt_id !== h.hunt_id));
-    api.deleteHunt(h.hunt_id).catch(() => {});
+    api.deleteHunt(h.hunt_id).catch(() => setHunts(prev)); // rollback if the server rejects
   }
 
   function createProject() {
@@ -138,10 +140,15 @@ export function DenDrawer() {
 
   function deleteProject(p: Project) {
     if (!window.confirm(`Delete project "${p.label}"? Its hunts stay — just unfiled.`)) return;
+    const prevP = projects;
+    const prevH = hunts;
     setProjects((ps) => ps.filter((x) => x.project_id !== p.project_id));
     setHunts((hs) => hs.map((h) => (h.project_id === p.project_id ? { ...h, project_id: null } : h)));
     if (activeProject === p.project_id) setActiveProject(null);
-    api.deleteProject(p.project_id).catch(() => {});
+    api.deleteProject(p.project_id).catch(() => {
+      setProjects(prevP); // rollback both on failure
+      setHunts(prevH);
+    });
   }
 
   function assignHunt(h: HuntListItem, projectId: string | null) {

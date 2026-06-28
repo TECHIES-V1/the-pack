@@ -1,8 +1,8 @@
 // Notifications (S — Doc 02) — derived from hunt states, no separate store: a hunt that finished is
 // "done", one waiting on you (a Hold) or that failed is "needs you". Clicking routes into the hunt.
 
-import { useEffect, useState } from "react";
-import { LuArrowLeft, LuCircleCheck, LuTriangleAlert } from "react-icons/lu";
+import { useCallback, useEffect, useState } from "react";
+import { LuArrowLeft, LuCircleCheck, LuTriangleAlert, LuRefreshCw } from "react-icons/lu";
 import { api, type HuntListItem } from "@/net/api";
 
 function goTo(path: string) {
@@ -23,13 +23,20 @@ export function NotificationsPage() {
   const [hunts, setHunts] = useState<HuntListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api
       .listHunts()
       .then((r) => setHunts(r.hunts))
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+
+  // Refresh on mount and whenever the tab regains focus (a hunt may have finished elsewhere).
+  useEffect(() => {
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [load]);
 
   const needsYou = hunts.filter((h) => NEEDS_YOU.has(h.state));
   const done = hunts.filter((h) => DONE.has(h.state));
@@ -45,6 +52,13 @@ export function NotificationsPage() {
           <LuArrowLeft size={18} />
         </button>
         <h1 className="text-[18px] font-medium m-0">Notifications</h1>
+        <button
+          onClick={load}
+          title="Refresh"
+          className="ml-auto p-2 text-[#a1a1aa] hover:text-white bg-transparent border-none cursor-pointer"
+        >
+          <LuRefreshCw size={15} />
+        </button>
       </header>
 
       <div className="max-w-[680px] mx-auto px-6 py-8 flex flex-col gap-8">

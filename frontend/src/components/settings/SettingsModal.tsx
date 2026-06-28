@@ -44,8 +44,12 @@ export function SettingsModal({ onClose }: { onClose?: () => void }) {
   }
 
   function removeDoc(id: number) {
+    const prev = docs;
     setDocs((d) => d.filter((x) => x.id !== id));
-    api.deleteDocument(id).catch(() => {});
+    api.deleteDocument(id).catch(() => {
+      setDocs(prev); // rollback — the server still has it
+      setKbError("Couldn't remove that document — try again.");
+    });
   }
 
   function clearConversation() {
