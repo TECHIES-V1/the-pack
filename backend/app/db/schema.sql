@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS memory (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Knowledge base (v4.2): your own documents, local-only. Parsed to text on upload and injected into
+-- a hunt's research as sources (alongside the web). No object store — the text is what's researched.
+CREATE TABLE IF NOT EXISTS documents (
+    id         BIGSERIAL   PRIMARY KEY,
+    name       TEXT        NOT NULL,
+    kind       TEXT        NOT NULL DEFAULT 'text',
+    text       TEXT        NOT NULL,
+    chars      INTEGER     NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Feedback: thumbs up/down votes on Alpha replies (turn_index matches the chatStore turn array).
 CREATE TABLE IF NOT EXISTS feedback (
     feedback_id TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,

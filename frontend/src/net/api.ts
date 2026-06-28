@@ -133,6 +133,12 @@ export interface ArtifactMeta {
   artifact_id: string;
   kind: string; // md | html | pdf | docx
 }
+export interface KbDoc {
+  id: number;
+  name: string;
+  kind: string;
+  chars: number;
+}
 export interface RehearseResult {
   est_cost_usd: number;
   est_time_s: number;
@@ -269,6 +275,16 @@ export const api = {
     form.append("file", file);
     return postForm<TranscriptReply>("/transcribe", form);
   },
+  // v4.1: what the pack remembers across hunts (the Elder's takeaways), most recent first.
+  getMemory: () => req<{ memory: { text: string; hunt_id: string | null }[] }>("/memory"),
+  // v4.2: your local knowledge base — documents the pack researches alongside the web.
+  listDocuments: () => req<{ documents: KbDoc[] }>("/documents"),
+  addDocument: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<KbDoc>("/documents", form);
+  },
+  deleteDocument: (id: number) => del<{ id: number; deleted: boolean }>(`/documents/${id}`),
   listInstincts: () => req<{ instincts: Instinct[] }>("/instincts"),
   saveInstinct: (label: string, spec: Record<string, unknown>) =>
     post<{ instinct_id: string; accepted: boolean }>("/instincts", { label, spec }),

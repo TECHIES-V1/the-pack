@@ -54,6 +54,7 @@ export function DenDrawer() {
   const setOpen = useUiStore((s) => s.setDenOpen);
   const [hunts, setHunts] = useState<HuntListItem[]>([]);
   const [instincts, setInstincts] = useState<Instinct[]>([]);
+  const [memory, setMemory] = useState<{ text: string }[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -61,10 +62,16 @@ export function DenDrawer() {
 
   useEffect(() => {
     if (!open) return;
-    Promise.allSettled([api.listHunts(), api.listInstincts(), api.listProjects()]).then(([h, i, p]) => {
+    Promise.allSettled([
+      api.listHunts(),
+      api.listInstincts(),
+      api.listProjects(),
+      api.getMemory(),
+    ]).then(([h, i, p, m]) => {
       if (h.status === "fulfilled") setHunts(h.value.hunts);
       if (i.status === "fulfilled") setInstincts(i.value.instincts);
       if (p.status === "fulfilled") setProjects(p.value.projects);
+      if (m.status === "fulfilled") setMemory(m.value.memory);
       setLoaded(true);
     });
   }, [open]);
@@ -269,6 +276,19 @@ export function DenDrawer() {
                   ))
                 )}
               </Section>
+
+              {memory.length > 0 && (
+                <Section title="What the pack remembers">
+                  {memory.slice(0, 6).map((m, idx) => (
+                    <p
+                      key={idx}
+                      className="text-[12px] leading-snug text-[#a1a1aa] m-0 rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] px-3 py-2"
+                    >
+                      {m.text}
+                    </p>
+                  ))}
+                </Section>
+              )}
             </div>
           </aside>
         </div>

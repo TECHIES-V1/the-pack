@@ -50,6 +50,7 @@ from app.prompts import load_prompt
 from app.qwen import pricing
 from app.qwen.client import OnDelta, QwenClient
 from app.qwen.types import CompletionResult
+from app.tools.knowledge import select_relevant
 from app.tools.memory import recall, remember
 from app.tools.web import WEB_FETCH, WEB_SEARCH
 
@@ -268,6 +269,7 @@ class Supervisor:
         self._search_ok = 0  # v2: web searches that succeeded
         self._no_sources = False  # v2: the hunt found no traceable ground — never fabricate
         self._blocks: list[dict] = []  # v3: Howler's tagged blocks [{text, source_ids}] for trace
+        self._kb_picks: list[dict] = []  # v4.2: your-library docs injected as sources this hunt
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -732,7 +734,18 @@ class Supervisor:
             {"step_id": step_id, "wolf_id": "tracker", "output_ref": out_ref, "confidence": 0.9},
         )
         sources = [s for f in findings for s in f.sources]
+        sources.extend(await self._absorb_knowledge())  # v4.2: weave in your library docs
         return Merged(summary=summary, claims=claims, conflict=conflict, output_ref=out_ref, sources=sources)
+
+    async def _absorb_knowledge(self) -> list[dict]:
+        """v4.2: pick the most relevant of your library docs and return them as injectable sources
+        (synthetic lib:// url so de-dupe keeps them). Best-effort — never sink a hunt."""
+        try:
+            docs = await self._repo.list_documents(with_text=True)
+        except Exception:  # noqa: BLE001 — the knowledge base is best-effort
+            return []
+        self._kb_picks = select_relevant(docs, self.task)
+        return list(self._kb_picks)
 
     async def resolve_conflict(self, conflict: Conflict) -> str:
         """Open a Hold for the human and block until they decide — unless the Packmaster set the
@@ -1052,7 +1065,10 @@ class Supervisor:
         )
         # The Elder records one durable takeaway for next time (best-effort, local-only).
         strategy = self._plan.get("strategy", "orchestrate")
-        takeaway = f"Hunted '{self.task}' via {strategy} — {len(sources)} sources."
+        scout_n = sum(1 for w in self._wolves.values() if w.role == "scout")
+        got = 0 if self._no_sources else len(sources)
+        outcome = f"{got} sources" if got else "no sourced ground"
+        takeaway = f"Topic '{self.task}': {strategy} strategy, {scout_n} scouts, {outcome}."
         await remember(self._repo, self._hunt_id, takeaway)
         await self._emit("hunt_completed", "engine", {"final_artifact_id": artifact_id, "totals": totals})
         await self._repo.set_hunt_state(self._hunt_id, "returned")
@@ -1356,6 +1372,8 @@ class Supervisor:
             srcs = "; ".join(f"{s.get('title', '')} ({s.get('url', '')})" for s in f.sources[:4])
             blocks.append(f"[{f.wolf_id}] {f.summary}\nSources: {srcs or 'none'}")
         out = "\n\n".join(blocks) or "No findings."
+        if self._memory_note:  # v4.1: the Elder's recall informs the merge too, not just the plan
+            out += f"\n\n{self._memory_note}"
         return out + self._extra_inputs_block()
 
     def _extra_inputs_block(self) -> str:
@@ -1379,6 +1397,9 @@ class Supervisor:
                 for i, s in enumerate(sources)
             )
             parts.append(f"Sources (cite each block by number):\n{numbered}")
+        if self._kb_picks:  # v4.2: give Howler the library text so it can actually cite it
+            lib = "\n".join(f"- {p['title']}: {p['text'][:600]}" for p in self._kb_picks)
+            parts.append(f"From your library:\n{lib}")
         block = self._extra_inputs_block()
         if block:
             parts.append(block.strip())

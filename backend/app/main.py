@@ -936,6 +936,55 @@ async def download_artifact(hunt_id: str, artifact_id: str, request: Request) ->
     )
 
 
+# --- memory (the Elder's cross-hunt notes) ---------------------------------------------
+
+
+@app.get("/memory", tags=["memory"])
+async def get_memory(request: Request) -> dict:
+    """What the pack remembers across hunts (the Elder's takeaways), most recent first."""
+    rows = await _repo(request).recent_memory(10)
+    return {
+        "memory": [
+            {"text": str(r.get("text") or ""), "hunt_id": r.get("hunt_id")}
+            for r in rows
+            if str(r.get("text") or "").strip()
+        ]
+    }
+
+
+# --- knowledge base (your documents, v4.2) ---------------------------------------------
+
+
+@app.post("/documents", status_code=202, tags=["documents"])
+async def add_document(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+    """Add a document to your local knowledge base — parsed to text and researchable by the pack."""
+    data = await file.read()
+    kind = detect_kind(file.filename or "", file.content_type or "")
+    if kind == "image":
+        text = await describe_image(data, file.content_type or "", file.filename or "")
+    elif kind == "video":
+        return JSONResponse(status_code=400, content={"detail": "video can't go in the knowledge base"})
+    else:
+        text = parse_bytes(data, kind)
+    text = (text or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"detail": "couldn't read any text from that file"})
+    doc_id = await _repo(request).save_document(file.filename or "document", kind, text)
+    return _accepted({"id": doc_id, "name": file.filename, "kind": kind, "chars": len(text)})
+
+
+@app.get("/documents", tags=["documents"])
+async def list_documents_route(request: Request) -> dict:
+    """Your knowledge-base documents (metadata only, no full text)."""
+    return {"documents": await _repo(request).list_documents()}
+
+
+@app.delete("/documents/{doc_id}", tags=["documents"])
+async def delete_document_route(doc_id: int, request: Request) -> JSONResponse:
+    await _repo(request).delete_document(doc_id)
+    return JSONResponse({"id": doc_id, "deleted": True})
+
+
 # --- instincts -------------------------------------------------------------------------
 
 

@@ -241,6 +241,51 @@ async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> 
     assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
 
 
+async def test_memory_carries_across_hunts() -> None:
+    """v4.1: a takeaway written when one hunt finishes is recalled into the next hunt's planning."""
+    repo = FakeRepo()
+
+    c1: asyncio.Queue = asyncio.Queue()
+    c1.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup1 = Supervisor(
+        "hunt_m1", Emitter("hunt_m1", repo), repo, QwenClient(), c1,
+        source="typed", raw_input="the solid-state battery market", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup1.run(), timeout=15)
+    assert any(m["kind"] == "takeaway" for m in repo.memory)  # a takeaway was stored
+
+    c2: asyncio.Queue = asyncio.Queue()
+    c2.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup2 = Supervisor(
+        "hunt_m2", Emitter("hunt_m2", repo), repo, QwenClient(), c2,
+        source="typed", raw_input="a totally unrelated topic", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup2.run(), timeout=15)
+    assert "solid-state battery" in sup2._memory_note  # hunt 1's lesson reached hunt 2's planning
+
+
+async def test_knowledge_base_doc_becomes_a_source() -> None:
+    """v4.2: a relevant library doc is injected into the hunt and shows up as a cited source."""
+    repo = FakeRepo()
+    await repo.save_document(
+        "battery-notes.md",
+        "md",
+        "Internal notes on the solid-state battery market: supplier roadmap and the cost curve.",
+    )
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_kb", Emitter("hunt_kb", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="the solid-state battery market", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    libs = [s for s in final["content"]["sources"] if str(s.get("url", "")).startswith("lib://")]
+    assert libs, "the library doc should appear as a source"
+    assert libs[0]["by"] == "your library"
+
+
 def test_broaden_keeps_the_subject_and_drops_filler() -> None:
     """Part 1: _broaden() makes a dry scout's retry query — short, plain, subject preserved."""
     repo = FakeRepo()

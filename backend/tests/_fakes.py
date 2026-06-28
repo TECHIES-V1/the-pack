@@ -19,12 +19,32 @@ class FakeRepo:
         self.hunts: dict[str, dict[str, Any]] = {}
         self.artifacts: list[dict[str, Any]] = []
         self.memory: list[dict[str, Any]] = []
+        self.documents: list[dict[str, Any]] = []
 
     async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
         self.memory.append({"hunt_id": hunt_id, "kind": kind, "text": text})
 
     async def recent_memory(self, limit: int = 5) -> list[dict[str, Any]]:
         return list(reversed(self.memory))[:limit]
+
+    async def save_document(self, name: str, kind: str, text: str) -> int:
+        doc_id = len(self.documents) + 1
+        self.documents.append(
+            {"id": doc_id, "name": name, "kind": kind, "text": text, "chars": len(text)}
+        )
+        return doc_id
+
+    async def list_documents(self, *, with_text: bool = False) -> list[dict[str, Any]]:
+        out = []
+        for d in reversed(self.documents):
+            row = {"id": d["id"], "name": d["name"], "kind": d["kind"], "chars": d["chars"]}
+            if with_text:
+                row["text"] = d["text"]
+            out.append(row)
+        return out
+
+    async def delete_document(self, doc_id: int) -> None:
+        self.documents = [d for d in self.documents if d["id"] != doc_id]
 
     async def create_hunt(
         self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"

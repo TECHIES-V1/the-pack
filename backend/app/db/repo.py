@@ -424,6 +424,26 @@ class Repo:
         )
         return [dict(r) for r in rows]
 
+    # --- knowledge base (your documents, v4.2) -----------------------------------------
+
+    async def save_document(self, name: str, kind: str, text: str) -> int:
+        row = await self._pool.fetchrow(
+            "INSERT INTO documents (name, kind, text, chars) VALUES ($1, $2, $3, $4) RETURNING id",
+            name,
+            kind,
+            text,
+            len(text),
+        )
+        return int(row["id"])
+
+    async def list_documents(self, *, with_text: bool = False) -> list[dict[str, Any]]:
+        cols = "id, name, kind, chars" + (", text" if with_text else "")
+        rows = await self._pool.fetch(f"SELECT {cols} FROM documents ORDER BY id DESC")
+        return [dict(r) for r in rows]
+
+    async def delete_document(self, doc_id: int) -> None:
+        await self._pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
+
     # --- checkpoints (stub now; resume logic NEXT) -------------------------------------
 
     async def save_checkpoint(
