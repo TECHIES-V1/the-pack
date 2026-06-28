@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     search_api_key: str = ""  # Tavily (the primary web-search vendor)
     search_max_results: int = 8
     search_cache_ttl_s: float = 3600.0  # reuse identical searches/URL reads within the window
+    # Fan-out timing: return at the SOFT deadline once we have any ground, extend to the hard
+    # BUDGET only when still empty, and let CONCURRENCY parallel scouts hit one upstream at once
+    # (sized so a full pack doesn't pile up to zero hits). Tunable per environment via .env.
+    search_soft_s: float = 2.5
+    search_budget_s: float = 7.0
+    search_provider_concurrency: int = 6
 
     # Multi-source research — every provider with a key present joins the fan-out; keyless ones
     # (Hacker News, Wikidata, DBpedia, OpenAlex) always run. ALL empty → canned offline provider.

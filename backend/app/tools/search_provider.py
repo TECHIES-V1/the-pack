@@ -80,15 +80,12 @@ class CannedProvider:
         return f"[offline] readable text extracted from {url}."
 
 
-# A fan-out returns within this budget: take what the fast providers gave, cancel the stragglers, so
-# one slow/hung upstream can't make every search wait out its full timeout.
-_SEARCH_BUDGET_S = 7.0
-
-# ...but the moment we have ANY ground, return at the soft deadline instead of blocking on the slow
-# providers. Without this, every search waits the full budget (a hung upstream taxes all of them) —
-# which, under parallel scouts, pileup-throttles most of them to zero hits. Only extend to the hard
-# ceiling when we still have nothing. Keeps the fast path ~soft, the desperate path ~budget.
-_SEARCH_SOFT_S = 2.5
+# Fan-out timing — defaults mirror config, but read from `settings` at call time so a .env override
+# (or a test monkeypatch of these module globals) takes effect. BUDGET is the hard ceiling; SOFT is
+# the early return once we have ground, so a hung upstream can't make every search wait it out —
+# which, under parallel scouts, pileup-throttles most of them to zero hits.
+_SEARCH_BUDGET_S = settings.search_budget_s
+_SEARCH_SOFT_S = settings.search_soft_s
 
 # Cap concurrent calls to the SAME upstream across parallel scouts — light rate-limit politeness.
 _PROVIDER_SEM: dict[str, asyncio.Semaphore] = {}
@@ -97,8 +94,8 @@ _PROVIDER_SEM: dict[str, asyncio.Semaphore] = {}
 def _sem(name: str) -> asyncio.Semaphore:
     # Cap concurrent calls to the SAME upstream. Sized so a full pack (3-5 scouts, each searching +
     # broadening) doesn't serialize on one fast provider — that pileup, not the providers, is what
-    # left most scouts with zero hits while one got them all.
-    return _PROVIDER_SEM.setdefault(name, asyncio.Semaphore(6))
+    # left most scouts with zero hits while one got them all. Tunable via settings.
+    return _PROVIDER_SEM.setdefault(name, asyncio.Semaphore(settings.search_provider_concurrency))
 
 
 class MultiProvider:
