@@ -16,6 +16,8 @@ import { TracksPage } from "@/pages/TracksPage";
 import { ScorecardPage } from "@/pages/ScorecardPage";
 import { StatesGallery } from "@/pages/StatesGallery";
 import { ShareView } from "@/pages/ShareView";
+import { LibraryPage } from "@/pages/LibraryPage";
+import { NotificationsPage } from "@/pages/NotificationsPage";
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { HuntCompleteToast } from "@/components/ui/HuntCompleteToast";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -26,7 +28,7 @@ import { useUiStore } from "@/store/uiStore";
 import { StreamClient } from "@/net/streamClient";
 import { startNewHunt } from "@/lib/nav";
 
-type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery" | "share";
+type View = "door" | "hunt" | "tracks" | "scorecard" | "gallery" | "share" | "library" | "notifications";
 
 interface Route {
   view: View;
@@ -44,6 +46,8 @@ function parseRoute(): Route {
   }
   if (path.startsWith("share/")) return { view: "share", huntId: null, token: path.slice("share/".length) };
   if (path === "gallery") return { view: "gallery", huntId: null };
+  if (path === "library") return { view: "library", huntId: null };
+  if (path === "notifications") return { view: "notifications", huntId: null };
   return { view: "door", huntId: null };
 }
 
@@ -115,6 +119,8 @@ export default function App() {
   else if (route.view === "tracks") page = <TracksPage huntId={route.huntId ?? ""} />;
   else if (route.view === "scorecard") page = <ScorecardPage huntId={route.huntId ?? ""} />;
   else if (route.view === "share") page = <ShareView token={route.token ?? ""} />;
+  else if (route.view === "library") page = <LibraryPage />;
+  else if (route.view === "notifications") page = <NotificationsPage />;
   else page = <StatesGallery />;
 
   // Show the connection badge only on a live hunt that hasn't reached a terminal state — a closed

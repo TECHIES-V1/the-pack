@@ -107,6 +107,7 @@ export interface CreateHuntBody {
   instinct_id?: string;
   source?: "typed" | "spoken" | "dropped";
   strategy?: StrategyName;
+  team?: { role: string; count: number }[]; // v5.2: seed a Library formation
 }
 export interface HuntCreated {
   hunt_id: string;

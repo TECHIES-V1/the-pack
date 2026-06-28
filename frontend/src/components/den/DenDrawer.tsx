@@ -3,7 +3,7 @@
 // (Rename / delete / archive / pin need backend endpoints — flagged, not faked.)
 
 import { useEffect, useMemo, useState } from "react";
-import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard, LuFolderPlus, LuFolderInput } from "react-icons/lu";
+import { LuPanelLeft, LuX, LuSearch, LuPlus, LuPencil, LuArchive, LuTrash2, LuLayoutDashboard, LuFolderPlus, LuFolderInput, LuLibrary, LuBell } from "react-icons/lu";
 import { api, type HuntListItem, type Instinct, type Project } from "@/net/api";
 import { startNewHunt } from "@/lib/nav";
 import { useUiStore } from "@/store/uiStore";
@@ -190,6 +190,20 @@ export function DenDrawer() {
               >
                 <LuPlus size={15} /> New hunt
               </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setOpen(false); goTo("/library"); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-[#2a2a2a] hover:bg-[#242424] px-3 py-1.5 text-[12px] text-[#d4d4d8] cursor-pointer"
+                >
+                  <LuLibrary size={13} /> Library
+                </button>
+                <button
+                  onClick={() => { setOpen(false); goTo("/notifications"); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-[#2a2a2a] hover:bg-[#242424] px-3 py-1.5 text-[12px] text-[#d4d4d8] cursor-pointer"
+                >
+                  <LuBell size={13} /> Activity
+                </button>
+              </div>
               <div className="flex items-center gap-2 rounded-lg bg-[#0F0F0F] border border-[#2a2a2a] px-2.5 py-1.5">
                 <LuSearch size={14} className="text-[#71717a] shrink-0" />
                 <input

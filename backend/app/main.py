@@ -162,6 +162,9 @@ class CreateHunt(BaseModel):
     strategy: str | None = Field(
         None, description="Research strategy: orchestrate | deep_dive | critique."
     )
+    team: list[dict] | None = Field(
+        None, description="v5.1/5.2: a formation to seed (overrides Beta's sizing), [{role,count}]."
+    )
 
 
 class ApprovePlan(BaseModel):
@@ -373,7 +376,7 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
     hunt_id = new_hunt_id()
     strategy = body.strategy or settings.default_strategy
     raw_input = body.input or ""
-    seed_team: list[dict] | None = None
+    seed_team: list[dict] | None = body.team if body.team else None  # v5.2: a Library formation
 
     # Start from a saved instinct (the Den) when one is given: its spec seeds the task + strategy,
     # and — v5.1 — its saved formation (team) if it has one.
