@@ -53,17 +53,20 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [noSources, setNoSources] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .getArtifact(huntId)
       .then((a) => {
-        const content = (a.content as { text?: string; sources?: unknown } | null) ?? {};
+        const content =
+          (a.content as { text?: string; sources?: unknown; no_sources?: boolean } | null) ?? {};
         if (typeof content.text === "string" && content.text.trim()) {
           setDraft(stripDashes(content.text.trim()));
         }
         setSources(toSources(content.sources));
+        setNoSources(Boolean(content.no_sources));
       })
       .catch(() => {});
   }, [huntId]);
@@ -165,17 +168,33 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
 
       <article className="flex-1 overflow-y-auto px-6 py-10 scrollbar-subtle">
         <div className="max-w-[760px] mx-auto">
-          <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
-          <p className="text-[13px] text-[#71717a] mt-2 mb-6">Researched and drafted by Pack</p>
-          {draft ? (
-            <div className="text-[15px] leading-7 text-[#d4d4d8]">
-              <MarkdownReply text={body} />
+          {noSources ? (
+            <div className="flex flex-col items-center text-center gap-4 py-20">
+              <div className="w-12 h-12 rounded-full border border-[#3a3a3a] flex items-center justify-center text-[#e6a23c] text-xl">
+                !
+              </div>
+              <h1 className="text-[20px] font-medium tracking-tight m-0">No sourced ground</h1>
+              <p className="text-[14px] leading-7 text-[#a1a1aa] max-w-[520px] m-0">{draft}</p>
+              <button
+                onClick={startNewHunt}
+                className="mt-1 rounded-lg bg-white text-black px-4 py-2 text-[13px] font-medium cursor-pointer border-none hover:bg-white/90"
+              >
+                Send the pack again →
+              </button>
             </div>
           ) : (
-            <p className="text-[14px] text-[#71717a]">Bringing back the brief…</p>
-          )}
+            <>
+              <h1 className="text-[28px] font-semibold tracking-tight m-0">{title}</h1>
+              <p className="text-[13px] text-[#71717a] mt-2 mb-6">Researched and drafted by Pack</p>
+              {draft ? (
+                <div className="text-[15px] leading-7 text-[#d4d4d8]">
+                  <MarkdownReply text={body} />
+                </div>
+              ) : (
+                <p className="text-[14px] text-[#71717a]">Bringing back the brief…</p>
+              )}
 
-          {sources.length > 0 && (
+              {sources.length > 0 && (
             <div className="mt-10 pt-6 border-t border-[#242424]">
               <h2 className="text-[15px] font-medium m-0 mb-3">Sources</h2>
               <ol className="m-0 pl-5 flex flex-col gap-2.5">
@@ -203,6 +222,8 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
                 ))}
               </ol>
             </div>
+              )}
+            </>
           )}
         </div>
       </article>

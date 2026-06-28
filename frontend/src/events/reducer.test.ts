@@ -99,7 +99,7 @@ describe("reducer narration (the chat feed)", () => {
       ev("step_started", { wolf_id: "tracker", step_id: "s2", summary: "merge" }, 4),
       ev("message_passed", { from_wolf: "scout-1", to_wolf: "tracker", intent: "handoff_findings", summary: "5 launches confirmed" }, 5),
       ev("hold_opened", { hold_id: "h1", question: "A or B?", options: ["A", "B"], recommended: "A" }, 6),
-      ev("hunt_completed", { final_artifact_id: "art_f", totals: {} }, 7),
+      ev("hunt_completed", { final_artifact_id: "art_f", totals: { sources: 3 } }, 7),
     ]);
     expect(texts).toEqual([
       "On it — sending the scouts out on 3 angles.",
@@ -167,5 +167,11 @@ describe("reducer v2 — team, clones, the Doctor", () => {
     ]);
     expect(s.plan?.team).toBeUndefined();
     expect(s.plan?.wolves).toContain("scout-1");
+  });
+
+  it("narrates an honest completion when no sources were found", () => {
+    expect(
+      feedTexts([ev("hunt_completed", { final_artifact_id: "a", totals: { sources: 0 } }, 1)]),
+    ).toContain("The pack came back without sources — nothing solid to brief on.");
   });
 });

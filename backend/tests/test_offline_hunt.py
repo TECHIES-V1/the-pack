@@ -208,6 +208,39 @@ async def test_offline_elder_recalls_and_remembers() -> None:
     assert len(repo.memory) == 2 and any("BNPL" in m["text"] for m in repo.memory)
 
 
+async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v3 (3.0): when search returns nothing, the pack returns an honest notice — never a fabricated
+    brief — and flags the artifact so the Reward shows a clear empty state."""
+    from app.tools import web
+
+    class _Empty:
+        ok = True
+        data = {"hits": []}
+        latency_ms = 5
+
+    async def _empty_run(**_kwargs):
+        return _Empty()
+
+    monkeypatch.setattr(web.WEB_SEARCH, "run", _empty_run)
+
+    repo = FakeRepo()
+    hunt_id = "hunt_nosrc"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="an extremely obscure topic", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    assert final["content"]["no_sources"] is True
+    assert "couldn't find sources" in final["content"]["text"]  # the honest no-results notice
+    assert final["content"]["sources"] == []
+    assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
+
+
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])
 async def test_offline_topic_awareness(strategy: str) -> None:
     """The hunt is topic-aware: the scouts' real queries mention the task, not a hardcoded demo."""

@@ -195,6 +195,18 @@ _INTENT_INSTRUCTIONS: dict[str, str] = {
 }
 
 
+# When research comes back empty the pack must NOT fabricate a brief — it says so plainly. Two honest
+# cases: the providers errored / were rate-limited, or they genuinely found nothing.
+_NO_SOURCES_NOTE = (
+    "The pack couldn't find sources for this one. The topic may be too sparse or the wording too "
+    "narrow — try rephrasing it, or drop in your own material, and send the pack again."
+)
+_SEARCH_UNAVAILABLE_NOTE = (
+    "Search came back empty — the providers may be rate-limited or down right now. Give it a few "
+    "minutes and try again, or add your own material for the pack to work from."
+)
+
+
 class StopHunt(Exception):
     """The user stopped the hunt."""
 
@@ -234,6 +246,9 @@ class Supervisor:
         self._doctors: list[str] = []  # v2: spawned Doctors (clone to heal several at once)
         self._faulted: set[str] = set()  # v2: wolves the Doctor has been sent to heal
         self._memory_note: str = ""  # v2: what the Elder recalled to seed the plan
+        self._search_attempts = 0  # v2: web searches run (to tell "no results" from "search down")
+        self._search_ok = 0  # v2: web searches that succeeded
+        self._no_sources = False  # v2: the hunt found no traceable ground — never fabricate
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -843,8 +858,29 @@ class Supervisor:
                 return
 
     async def draft(self, merged: Merged, decision: str | None = None, step_id: str = "s3") -> str:
-        """Howler writes the final briefing from the merged claims and the chosen decision."""
+        """Howler writes the final briefing from the merged claims and the chosen decision. With NO
+        sources there is no traceable ground — we don't ask Howler to write (it would only refuse);
+        we return an honest notice instead."""
         await self._absorb_inputs()  # A7: last chance to fold in mid-hunt input before drafting
+        if not self._dedupe_sources(merged.sources):
+            self._no_sources = True
+            unavailable = self._search_attempts > 0 and self._search_ok == 0
+            await self._emit(
+                "step_started",
+                "howler",
+                {"step_id": step_id, "wolf_id": "howler", "summary": "No sources to write up"},
+            )
+            await self._emit(
+                "step_completed",
+                "howler",
+                {
+                    "step_id": step_id,
+                    "wolf_id": "howler",
+                    "output_ref": f"art_{self._hunt_id}_draft",
+                    "confidence": 0.0,
+                },
+            )
+            return _SEARCH_UNAVAILABLE_NOTE if unavailable else _NO_SOURCES_NOTE
         if self._mode == "on_command":
             await self._confirm_draft()
         howler = self._wolves["howler"]
@@ -882,7 +918,13 @@ class Supervisor:
             self._hunt_id,
             "final",
             "howler",
-            {"text": draft_text, "claims": merged.claims, "sources": sources, "span_map_ref": spanmap_ref},
+            {
+                "text": draft_text,
+                "claims": merged.claims,
+                "sources": sources,
+                "span_map_ref": spanmap_ref,
+                "no_sources": self._no_sources or not sources,  # honest empty state
+            },
         )
         await self._emit(
             "artifact_created",
@@ -1031,6 +1073,9 @@ class Supervisor:
             "tool_called", wolf.wolf_id, {"wolf_id": wolf.wolf_id, "tool": "web_search", "args_summary": query}
         )
         res = await WEB_SEARCH.run(wolf_id=wolf.wolf_id, query=query)
+        self._search_attempts += 1
+        if res.ok:
+            self._search_ok += 1
         stray = self._stray.record_tool_result(wolf.wolf_id, res.ok)
         hits = (res.data or {}).get("hits", []) if isinstance(res.data, dict) else []
         ref: str | None = None

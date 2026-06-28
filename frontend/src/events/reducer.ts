@@ -399,14 +399,21 @@ export function reduce(state: HuntView, ev: PackEvent): HuntView {
     case "artifact_created":
       return f(ev, "kind") === "final" ? { ...s, finalArtifactId: f(ev, "artifact_id") } : s;
 
-    case "hunt_completed":
+    case "hunt_completed": {
+      const totals = f<Record<string, unknown>>(ev, "totals");
+      const sourced = Number(totals?.sources ?? 0) > 0;
       return {
         ...s,
         state: "returned",
         finalArtifactId: f(ev, "final_artifact_id"),
-        totals: f<Record<string, unknown>>(ev, "totals"),
-        feed: feed(s, ev, "Your brief's ready."),
+        totals,
+        feed: feed(
+          s,
+          ev,
+          sourced ? "Your brief's ready." : "The pack came back without sources — nothing solid to brief on.",
+        ),
       };
+    }
 
     case "hunt_failed":
       return {
