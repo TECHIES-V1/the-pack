@@ -248,6 +248,7 @@ class Supervisor:
         source: str = "typed",
         raw_input: str = "",
         strategy: str | None = None,
+        seed_team: list[dict] | None = None,
     ) -> None:
         self._hunt_id = hunt_id
         self._emitter = emitter
@@ -259,6 +260,7 @@ class Supervisor:
         self._strategy = get_strategy(strategy)
         self._wolves: dict[str, Wolf] = {}
         self._team: list[dict] = []  # v2: the per-task formation Beta proposes / the user edits
+        self._seed_team = seed_team or []  # v5.1: a saved Instinct's formation overrides Beta's
         self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap
         self._wolf_spend: dict[str, float] = {}  # v2: per-wolf cumulative spend
         self._relieved: set[str] = set()  # v2: wolves stood down at their own cap
@@ -349,7 +351,8 @@ class Supervisor:
         """Coerce the model's plan into a schema-valid plan_proposed payload: build the per-task
         TEAM, then derive the scout angles/steps/worker-roster from it (additive canvas fields)."""
         task = self._raw_input or "the topic"
-        self._team = _build_team(parsed)
+        # v5.1: a saved Instinct's formation seeds the team (overrides Beta's sizing); else Beta's.
+        self._team = _build_team({"team": self._seed_team} if self._seed_team else parsed)
         scout_ids = _wolf_ids("scout", self._scout_count())
         n = len(scout_ids)
         queries = [str(q).strip() for q in (parsed.get("queries") or []) if str(q).strip()][:n]

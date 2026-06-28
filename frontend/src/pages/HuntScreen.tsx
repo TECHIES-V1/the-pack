@@ -165,7 +165,11 @@ export function HuntScreen() {
               transition={{ duration: 0.2 }}
               className="w-[min(900px,95vw)] h-[min(88vh,900px)] outline-none overflow-hidden rounded-2xl border border-[#2a2a2a] bg-door-bg shadow-2xl"
             >
-              <DocumentView huntId={huntId} onClose={() => setBriefOpen(false)} />
+              <DocumentView
+                huntId={huntId}
+                team={view.plan?.team ?? undefined}
+                onClose={() => setBriefOpen(false)}
+              />
             </motion.div>
           </motion.div>
         )}

@@ -8,6 +8,7 @@ import { MarkdownReply } from "@/components/chat/MarkdownReply";
 import { stripDashes } from "@/lib/text";
 import { startNewHunt } from "@/lib/nav";
 import { api } from "@/net/api";
+import type { TeamMember } from "@/events/reducer";
 
 function goTo(path: string) {
   window.history.pushState({}, "", path);
@@ -54,7 +55,15 @@ interface Block {
   source_ids: number[];
 }
 
-export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: () => void }) {
+export function DocumentView({
+  huntId,
+  team,
+  onClose,
+}: {
+  huntId: string;
+  team?: TeamMember[];
+  onClose?: () => void;
+}) {
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
@@ -165,10 +174,11 @@ export function DocumentView({ huntId, onClose }: { huntId: string; onClose?: ()
                   setMenu(false);
                   try {
                     const snap = await api.getHunt(huntId);
-                    // Store a loadable spec so re-running the instinct seeds the same task + strategy.
+                    // Store a loadable spec so re-running seeds the same task, strategy, AND formation.
                     await api.saveInstinct(snap.task || title, {
                       task: snap.task,
                       strategy: snap.strategy,
+                      team: team ?? undefined, // v5.1: the formation that ran
                       hunt_id: huntId,
                     });
                     flash("Saved as instinct");

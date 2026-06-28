@@ -264,6 +264,25 @@ async def test_memory_carries_across_hunts() -> None:
     assert "solid-state battery" in sup2._memory_note  # hunt 1's lesson reached hunt 2's planning
 
 
+async def test_seed_team_overrides_beta_sizing() -> None:
+    """v5.1: a saved Instinct's formation seeds the team instead of Beta's per-task sizing."""
+    repo = FakeRepo()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_seed", Emitter("hunt_seed", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="anything at all", strategy="orchestrate",
+        seed_team=[{"role": "scout", "count": 5}],
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    scouts = [
+        e.payload["wolf_id"]
+        for e in repo.all_events("hunt_seed")
+        if e.type == "wolf_spawned" and e.payload.get("role") == "scout"
+    ]
+    assert len(scouts) == 5  # the seeded 5 scouts, not FakeQwen's default 3
+
+
 async def test_knowledge_base_doc_becomes_a_source() -> None:
     """v4.2: a relevant library doc is injected into the hunt and shows up as a cited source."""
     repo = FakeRepo()

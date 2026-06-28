@@ -373,14 +373,19 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
     hunt_id = new_hunt_id()
     strategy = body.strategy or settings.default_strategy
     raw_input = body.input or ""
+    seed_team: list[dict] | None = None
 
-    # Start from a saved instinct (the Den) when one is given: its spec seeds the task + strategy.
+    # Start from a saved instinct (the Den) when one is given: its spec seeds the task + strategy,
+    # and — v5.1 — its saved formation (team) if it has one.
     if body.instinct_id:
         inst = await repo.get_instinct(body.instinct_id)
         if inst is not None:
             spec = inst.get("spec") or {}
             raw_input = body.input or str(spec.get("task") or inst.get("label") or "").strip()
             strategy = body.strategy or str(spec.get("strategy") or strategy)
+            team = spec.get("team")
+            if isinstance(team, list) and team:
+                seed_team = team
 
     await repo.create_hunt(hunt_id, body.source, raw_input, strategy)
 
@@ -395,6 +400,7 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
         source=body.source,
         raw_input=raw_input,
         strategy=strategy,
+        seed_team=seed_team,
     )
     handle.task = asyncio.create_task(supervisor.run(), name=f"hunt-{hunt_id}")
     return _accepted({"hunt_id": hunt_id, "state": "planning"})
