@@ -151,6 +151,17 @@ def _plain_query(query: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -|")
     return cleaned or query.strip()
 
+
+# Filler dropped when broadening a dry scout query — articles/connectors + doc-shaped noise words
+# that narrow a search without adding topic signal ("release notes", "documentation", "github"...).
+_BROADEN_STOP = frozenset(
+    {
+        "the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "with", "its", "their",
+        "is", "are", "release", "notes", "documentation", "docs", "overview", "guide",
+        "github", "official", "latest", "key", "facts",
+    }
+)
+
 # What each dispatch asks its wolf to do. The role's prompt file is the system message; this is
 # the task-specific instruction appended to the user message.
 _INTENT_INSTRUCTIONS: dict[str, str] = {
@@ -1149,13 +1160,27 @@ class Supervisor:
             in_tokens=0, out_tokens=0, cost_usd=0.0, parsed=None,
         )
 
-    async def _scout_search(
+    def _broaden(self, query: str) -> str:
+        """A shorter, plainer query for a scout's SECOND attempt when its first came back dry: the
+        task subject's keywords plus the angle's most distinctive ones, capped short. Deterministic
+        (no model call). Keeps each scout on ITS OWN angle so the pack's sources stay diverse."""
+        subject = [w for w in _plain_query(self.task).split() if w.lower() not in _BROADEN_STOP][:4]
+        have = {w.lower() for w in subject}
+        extra = [
+            w
+            for w in _plain_query(query).split()
+            if w.lower() not in have and w.lower() not in _BROADEN_STOP
+        ][:3]
+        return " ".join(subject + extra) or _plain_query(query) or self.task
+
+    async def _one_search(
         self, wolf: Wolf, query: str
     ) -> tuple[list[dict], bool, str | None, str | None]:
-        """Run the real web_search, deep-read the top hit (web_fetch), persist the hits, emit the
-        tool events. Returns (hits, ok, artifact_ref, stray_pattern-or-None)."""
+        """One real web_search: emit tool events, account for it, persist hits. No fetch here."""
         await self._emit(
-            "tool_called", wolf.wolf_id, {"wolf_id": wolf.wolf_id, "tool": "web_search", "args_summary": query}
+            "tool_called",
+            wolf.wolf_id,
+            {"wolf_id": wolf.wolf_id, "tool": "web_search", "args_summary": query},
         )
         res = await WEB_SEARCH.run(wolf_id=wolf.wolf_id, query=query)
         self._search_attempts += 1
@@ -1182,6 +1207,25 @@ class Supervisor:
                 "hits": len(hits),  # additive: lets the canvas show a per-wolf source count
             },
         )
+        return hits, res.ok, ref, stray
+
+    async def _scout_search(
+        self, wolf: Wolf, query: str
+    ) -> tuple[list[dict], bool, str | None, str | None]:
+        """Run the real web_search, deep-read the top hit (web_fetch), persist the hits, emit the
+        tool events. Returns (hits, ok, artifact_ref, stray_pattern-or-None).
+
+        If the scout's own angle comes back DRY, broaden ONCE and range again before giving up —
+        this is what keeps every scout productive instead of the pack collapsing onto one."""
+        hits, ok, ref, stray = await self._one_search(wolf, query)
+        if not hits:
+            broad = self._broaden(query)
+            if broad and broad.lower() != _plain_query(query).lower():
+                await self.progress(wolf.wolf_id, "searching", f"Broadening: {broad}")
+                hits, ok2, ref2, stray2 = await self._one_search(wolf, broad)
+                ok = ok or ok2
+                ref = ref2 or ref
+                stray = stray2 or stray
 
         # A4 — deep-read the top hit so findings rest on the full page, not just the snippet.
         if hits and hits[0].get("url"):
@@ -1211,7 +1255,7 @@ class Supervisor:
         for h in hits:
             h["by"] = wolf.wolf_id
             h["verified"] = bool(h.get("text"))
-        return hits, res.ok, ref, stray
+        return hits, ok, ref, stray
 
     def _progress_sink(self, wolf_id: str, phase: str) -> OnDelta:
         """Coalesce streamed text into a few sentence-bounded `wolf_progress` beats (never one

@@ -241,6 +241,71 @@ async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> 
     assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
 
 
+def test_broaden_keeps_the_subject_and_drops_filler() -> None:
+    """Part 1: _broaden() makes a dry scout's retry query — short, plain, subject preserved."""
+    repo = FakeRepo()
+    sup = Supervisor(
+        "h", Emitter("h", repo), repo, QwenClient(), asyncio.Queue(),
+        source="typed", raw_input="the Qwen3 open-source model family", strategy="orchestrate",
+    )
+    out = sup._broaden("Qwen3 code math variants GitHub release notes")
+    assert out == sup._broaden("Qwen3 code math variants GitHub release notes")  # deterministic
+    low = out.lower()
+    assert "qwen3" in low  # the task subject survives
+    assert "github" not in low and "release" not in low and "notes" not in low  # filler dropped
+    assert 0 < len(out.split()) <= 7  # capped short so it actually returns hits
+
+
+async def test_offline_dry_scout_broadens_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Part 1: when the scouts' first (narrow) angles come back dry, each broadens once and ranges
+    again — so the pack returns with sources instead of collapsing onto a single working scout."""
+    from app.tools import web
+
+    class _R:
+        def __init__(self, hits: list[dict]) -> None:
+            self.ok = True
+            self.data = {"hits": hits}
+            self.latency_ms = 5
+
+    calls = {"n": 0}
+
+    async def _flaky_search(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 3:  # the 3 scouts' first angles return nothing
+            return _R([])
+        n = calls["n"]
+        return _R(
+            [{"title": f"Hit {n}", "url": f"https://example.com/{n}", "snippet": "real ground"}]
+        )
+
+    class _F:
+        ok = False
+        data = {"text": ""}
+        latency_ms = 1
+
+    async def _no_fetch(**_kwargs):
+        return _F()
+
+    monkeypatch.setattr(web.WEB_SEARCH, "run", _flaky_search)
+    monkeypatch.setattr(web.WEB_FETCH, "run", _no_fetch)
+
+    repo = FakeRepo()
+    hunt_id = "hunt_dry"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="a narrow research topic", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    assert final["content"]["no_sources"] is False
+    assert final["content"]["sources"], "the broadened retry recovered real sources"
+    assert calls["n"] > 3, "the dry first pass triggered at least one broaden retry"
+
+
 async def test_offline_draft_is_tagged_with_provenance() -> None:
     """v3 (3.2): the final brief carries tagged blocks + a block-level provenance map."""
     repo = FakeRepo()
