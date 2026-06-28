@@ -357,6 +357,29 @@ class Repo:
             "content": row["content"],
         }
 
+    async def list_artifacts(self, hunt_id: str) -> list[dict[str, Any]]:
+        """All artifacts for a hunt (id + kind) — the Reward's format tabs (v3)."""
+        rows = await self._pool.fetch(
+            "SELECT artifact_id, kind FROM artifacts WHERE hunt_id = $1 ORDER BY created_at",
+            hunt_id,
+        )
+        return [{"artifact_id": r["artifact_id"], "kind": r["kind"]} for r in rows]
+
+    async def get_artifact_row(self, artifact_id: str) -> dict[str, Any] | None:
+        """One artifact by id (for downloading a forged file), or None."""
+        row = await self._pool.fetchrow(
+            "SELECT artifact_id, hunt_id, kind, content FROM artifacts WHERE artifact_id = $1",
+            artifact_id,
+        )
+        if row is None:
+            return None
+        return {
+            "artifact_id": row["artifact_id"],
+            "hunt_id": row["hunt_id"],
+            "kind": row["kind"],
+            "content": row["content"],
+        }
+
     # --- instincts (the Den) -----------------------------------------------------------
 
     async def list_instincts(self) -> list[dict[str, Any]]:

@@ -13,6 +13,7 @@ cancel running hunts, drain the relay, and close everything.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 import secrets
@@ -20,7 +21,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from openai import APIStatusError, RateLimitError
 from pydantic import BaseModel, Field
 
@@ -903,6 +904,36 @@ async def get_artifact(hunt_id: str, request: Request) -> JSONResponse:
     if artifact is None:
         return JSONResponse(status_code=404, content={"detail": "no final artifact yet"})
     return JSONResponse(content=artifact)
+
+
+_DOWNLOADABLE = {"md", "html", "pdf", "docx"}
+
+
+@app.get("/hunts/{hunt_id}/artifacts", tags=["hunts"])
+async def list_artifacts(hunt_id: str, request: Request) -> dict:
+    """The forged files for this hunt (the Reward's format tabs) — id + kind only."""
+    rows = await _repo(request).list_artifacts(hunt_id)
+    return {"artifacts": [r for r in rows if r["kind"] in _DOWNLOADABLE]}
+
+
+@app.get("/hunts/{hunt_id}/artifacts/{artifact_id}", tags=["hunts"])
+async def download_artifact(hunt_id: str, artifact_id: str, request: Request) -> Response:
+    """Download one forged file — base64-decoded, with the right content-type and a filename."""
+    row = await _repo(request).get_artifact_row(artifact_id)
+    if row is None or row["hunt_id"] != hunt_id:
+        return JSONResponse(status_code=404, content={"detail": "artifact not found"})
+    content = row.get("content") or {}
+    b64 = content.get("b64")
+    if not b64:
+        return JSONResponse(status_code=404, content={"detail": "not a downloadable file"})
+    data = base64.b64decode(b64)
+    mime = content.get("mime", "application/octet-stream")
+    filename = f"pack-brief.{row['kind']}"
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # --- instincts -------------------------------------------------------------------------
