@@ -52,6 +52,28 @@ class FakeRepo:
     async def clear_memory(self) -> None:
         self.memory = []
 
+    async def list_hunts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        return [
+            {
+                "hunt_id": hid,
+                "title": h.get("raw_input") or hid,
+                "state": h.get("state", "draft"),
+                "source": h.get("source", "typed"),
+                "boundary_usd": None,
+                "project_id": None,
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+            for hid, h in self.hunts.items()
+        ]
+
+    async def spend_by_hunt(self) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for hid, evs in self.events.items():
+            for e in evs:
+                if e.type == "hunt_completed":
+                    out[hid] = float((e.payload.get("totals") or {}).get("cost_usd") or 0)
+        return out
+
     async def create_hunt(
         self, hunt_id: str, source: str, raw_input: str | None, strategy: str = "orchestrate"
     ) -> None:

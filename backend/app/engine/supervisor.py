@@ -272,6 +272,7 @@ class Supervisor:
         self._no_sources = False  # v2: the hunt found no traceable ground — never fabricate
         self._blocks: list[dict] = []  # v3: Howler's tagged blocks [{text, source_ids}] for trace
         self._kb_picks: list[dict] = []  # v4.2: your-library docs injected as sources this hunt
+        self._kb_absorbed = False  # v4.2: absorb the KB once, not per merge() (deep_dive/critique)
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
@@ -742,7 +743,11 @@ class Supervisor:
 
     async def _absorb_knowledge(self) -> list[dict]:
         """v4.2: pick the most relevant of your library docs and return them as injectable sources
-        (synthetic lib:// url so de-dupe keeps them). Best-effort — never sink a hunt."""
+        (synthetic lib:// url so de-dupe keeps them). Absorbed ONCE per hunt — deep_dive/critique
+        call merge() twice. Best-effort — never sink a hunt."""
+        if self._kb_absorbed:
+            return list(self._kb_picks)
+        self._kb_absorbed = True
         try:
             docs = await self._repo.list_documents(with_text=True)
         except Exception:  # noqa: BLE001 — the knowledge base is best-effort

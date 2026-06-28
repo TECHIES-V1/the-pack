@@ -303,9 +303,13 @@ async def test_knowledge_base_doc_becomes_a_source() -> None:
     await asyncio.wait_for(sup.run(), timeout=15)
 
     final = next(a for a in repo.artifacts if a["kind"] == "final")
-    libs = [s for s in final["content"]["sources"] if str(s.get("url", "")).startswith("lib://")]
+    all_sources = final["content"]["sources"]
+    libs = [s for s in all_sources if str(s.get("url", "")).startswith("lib://")]
+    webs = [s for s in all_sources if not str(s.get("url", "")).startswith("lib://")]
     assert libs, "the library doc should appear as a source"
     assert libs[0]["by"] == "your library"
+    assert webs, "web + library sources coexist (mixed de-dup keeps both)"
+    assert len({s.get("url") for s in all_sources}) == len(all_sources)  # no dupes
 
 
 def test_broaden_keeps_the_subject_and_drops_filler() -> None:
