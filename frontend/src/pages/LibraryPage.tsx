@@ -45,19 +45,43 @@ const FORMATIONS: Formation[] = [
 
 export function LibraryPage() {
   const [saved, setSaved] = useState<Instinct[]>([]);
+  const [picked, setPicked] = useState<Formation | null>(null);
+  const [topic, setTopic] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.listInstincts().then((r) => setSaved(r.instincts)).catch(() => {});
   }, []);
 
-  function launch(team: TeamMember[], strategy: StrategyName) {
-    const topic = window.prompt("What should this pack hunt down?")?.trim();
-    if (!topic) return;
-    const seed = team.map((m) => ({ role: m.role, count: m.count }));
-    api
-      .createHunt({ input: topic, source: "typed", strategy, team: seed })
-      .then(({ hunt_id }) => goTo(`/hunt/${hunt_id}/plan`))
-      .catch(() => {});
+  function pick(f: Formation) {
+    setPicked(f);
+    setTopic("");
+    setError(null);
+  }
+
+  async function launch() {
+    if (!picked) return;
+    const t = topic.trim();
+    if (!t) {
+      setError("Give the pack a topic to hunt.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const seed = picked.team.map((m) => ({ role: m.role, count: m.count }));
+      const { hunt_id } = await api.createHunt({
+        input: t,
+        source: "typed",
+        strategy: picked.strategy,
+        team: seed,
+      });
+      goTo(`/hunt/${hunt_id}/plan`);
+    } catch {
+      setBusy(false);
+      setError("Couldn't start the hunt — is the engine running?");
+    }
   }
 
   function launchInstinct(id: string) {
@@ -86,7 +110,7 @@ export function LibraryPage() {
           {FORMATIONS.map((f) => (
             <button
               key={f.key}
-              onClick={() => launch(f.team, f.strategy)}
+              onClick={() => pick(f)}
               className="text-left bg-[#141414] border border-[#2a2a2a] rounded-2xl p-3 hover:border-[#404040] cursor-pointer flex flex-col gap-2"
             >
               <div className="rounded-xl overflow-hidden bg-[#0F0F0F] border border-[#222]">
@@ -125,6 +149,53 @@ export function LibraryPage() {
           </>
         )}
       </div>
+
+      {picked && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => !busy && setPicked(null)}
+        >
+          <div
+            className="w-[min(460px,94vw)] bg-[#1A1A1A] border border-[#2a2a2a] rounded-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[#0F0F0F] border-b border-[#222]">
+              <FormationPreview team={picked.team} height={150} />
+            </div>
+            <div className="p-5 flex flex-col gap-3">
+              <div>
+                <div className="text-[15px] font-medium">{picked.label}</div>
+                <div className="text-[12px] text-[#a1a1aa] mt-0.5">{picked.brings}</div>
+              </div>
+              <input
+                autoFocus
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && launch()}
+                placeholder="What should this pack hunt down?"
+                className="w-full bg-[#0F0F0F] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-[14px] text-white outline-none focus:border-[#404040] placeholder:text-[#52525b]"
+              />
+              {error && <p className="text-[12px] text-[#ff6b5e] m-0">{error}</p>}
+              <div className="flex items-center justify-end gap-2 mt-1">
+                <button
+                  onClick={() => setPicked(null)}
+                  disabled={busy}
+                  className="rounded-lg border border-[#2a2a2a] text-[#a1a1aa] hover:text-white px-3.5 py-2 text-[13px] cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={launch}
+                  disabled={busy}
+                  className="rounded-lg bg-white text-black px-4 py-2 text-[13px] font-medium cursor-pointer border-none hover:bg-white/90 disabled:opacity-60"
+                >
+                  {busy ? "Starting…" : "Send the pack →"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
