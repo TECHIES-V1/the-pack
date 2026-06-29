@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     session_secret: str = "change-me-in-prod"
     engine_host: str = "0.0.0.0"
     engine_port: int = 8000
+    # Ops surface (all .env-overridable). CORS defaults open for local-only; lock down to expose.
+    cors_origins: str = "*"  # comma-separated origin list, or "*"
+    max_upload_mb: int = 25  # cap on uploaded files (/documents, /parse, /transcribe) — DoS guard
+    db_pool_max_size: int = 10
+    rate_limit_per_min: int = 60  # per-IP cap on expensive endpoints (0 disables)
 
     # Boundary.
     first_hunt_cap_usd: float = 0.50

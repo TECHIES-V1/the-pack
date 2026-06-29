@@ -153,6 +153,24 @@ def _accepted(body: dict) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=body)
 
 
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read an upload fully, but refuse anything over `max_upload_mb` BEFORE buffering it all — an
+    unbounded `await file.read()` lets one client OOM the engine."""
+    cap = settings.max_upload_mb * 1024 * 1024
+    if file.size is not None and file.size > cap:
+        raise HTTPException(status_code=413, detail=f"file too large (max {settings.max_upload_mb}MB)")
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1 << 20):  # 1 MiB at a time
+        total += len(chunk)
+        if total > cap:
+            raise HTTPException(
+                status_code=413, detail=f"file too large (max {settings.max_upload_mb}MB)"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 # --- command + response bodies ---------------------------------------------------------
 
 
@@ -993,7 +1011,7 @@ async def get_spend(request: Request) -> dict:
 @app.post("/documents", status_code=202, tags=["documents"])
 async def add_document(request: Request, file: UploadFile = File(...)) -> JSONResponse:
     """Add a document to your local knowledge base — parsed to text and researchable by the pack."""
-    data = await file.read()
+    data = await _read_capped(file)
     kind = detect_kind(file.filename or "", file.content_type or "")
     if kind == "image":
         text = await describe_image(data, file.content_type or "", file.filename or "")
@@ -1059,7 +1077,7 @@ async def parse_document(
             return JSONResponse(status_code=400, content={"detail": f"could not fetch URL: {exc}"})
         return JSONResponse({"kind": "url", "text": text, "chars": len(text)})
     if file is not None:
-        data = await file.read()
+        data = await _read_capped(file)
         kind = detect_kind(file.filename or "", file.content_type or "")
         if kind == "image":
             text = await describe_image(data, file.content_type or "", file.filename or "")
@@ -1078,7 +1096,7 @@ async def parse_document(
 async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
     """Transcribe uploaded audio (or a VIDEO's audio track, v5.7) into text for a new hunt. The
     frontend then calls createHunt with the transcript. Offline returns a placeholder."""
-    data = await file.read()
+    data = await _read_capped(file)
     content_type = file.content_type or ""
     if detect_kind(file.filename or "", content_type) == "video":
         audio = await extract_audio(data)
@@ -1099,7 +1117,7 @@ async def transcribe_into_hunt(
 ) -> JSONResponse:
     """Transcribe audio and fold it into a RUNNING hunt: the Supervisor emits transcript_ready +
     input_added and weighs the transcript at the next synthesis step."""
-    data = await file.read()
+    data = await _read_capped(file)
     t = await TRANSCRIBER.transcribe(data, content_type=file.content_type or "")
     ok = await _registry(request).send(
         hunt_id,

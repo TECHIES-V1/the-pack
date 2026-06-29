@@ -41,6 +41,16 @@ def test_documents_crud_roundtrip() -> None:
     assert client.get("/documents").json()["documents"] == []
 
 
+def test_upload_over_cap_is_rejected_413(monkeypatch) -> None:
+    # B1: a file over max_upload_mb must 413 before being buffered into memory.
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "max_upload_mb", 0)  # cap = 0 → any non-empty upload is too large
+    client = _client()
+    r = client.post("/documents", files={"file": ("big.txt", b"x" * 2048, "text/plain")})
+    assert r.status_code == 413
+
+
 def test_documents_rejects_empty_text() -> None:
     client = _client()
     r = client.post("/documents", files={"file": ("blank.txt", b"   ", "text/plain")})
