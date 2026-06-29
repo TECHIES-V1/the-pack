@@ -51,6 +51,21 @@ def test_upload_over_cap_is_rejected_413(monkeypatch) -> None:
     assert r.status_code == 413
 
 
+def test_bad_request_bodies_are_422() -> None:
+    # B5: invalid enums/shapes are rejected at the door, before reaching the engine.
+    client = _client()
+    assert client.post("/hunts", json={"input": "x", "strategy": "bogus"}).status_code == 422
+    assert client.post("/hunts", json={"input": "x", "source": "carrier-pigeon"}).status_code == 422
+    assert (
+        client.post("/hunts/h1/plan/approve", json={"mode": "yolo", "boundary_usd": 1}).status_code
+        == 422
+    )
+    assert (
+        client.post("/hunts/h1/plan/approve", json={"mode": "wild", "boundary_usd": -5}).status_code
+        == 422
+    )
+
+
 def test_documents_rejects_empty_text() -> None:
     client = _client()
     r = client.post("/documents", files={"file": ("blank.txt", b"   ", "text/plain")})

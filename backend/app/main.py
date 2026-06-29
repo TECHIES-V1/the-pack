@@ -18,6 +18,7 @@ import json
 import re
 import secrets
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -174,35 +175,40 @@ async def _read_capped(file: UploadFile) -> bytes:
 # --- command + response bodies ---------------------------------------------------------
 
 
+# Shared enums — reject junk at the door (422) instead of letting it reach the engine.
+Strategy = Literal["orchestrate", "deep_dive", "critique"]
+Source = Literal["typed", "spoken", "dropped"]
+Mode = Literal["wild", "on_signal", "on_command"]
+InputKind = Literal["text", "pdf", "csv", "md", "url", "image", "audio", "video"]
+_MAX_TASK = 10_000
+_MAX_INPUT = 200_000
+
+
 class CreateHunt(BaseModel):
-    input: str | None = Field(None, description="The task, typed or transcribed.")
-    instinct_id: str | None = Field(None, description="Start from a saved instinct instead.")
-    source: str = Field("typed", description="typed | spoken | dropped")
-    strategy: str | None = Field(
-        None, description="Research strategy: orchestrate | deep_dive | critique."
-    )
-    team: list[dict] | None = Field(
-        None, description="v5.1/5.2: a formation to seed (overrides Beta's sizing), [{role,count}]."
-    )
+    input: str | None = Field(None, max_length=_MAX_TASK, description="The task, typed or transcribed.")
+    instinct_id: str | None = Field(None, max_length=120)
+    source: Source = "typed"
+    strategy: Strategy | None = Field(None, description="Research strategy.")
+    team: list[dict] | None = Field(None, max_length=16, description="Seed formation [{role,count}].")
 
 
 class ApprovePlan(BaseModel):
-    mode: str = Field(..., description="wild | on_signal | on_command")
-    boundary_usd: float = Field(..., description="The dollar Boundary for this hunt.")
+    mode: Mode
+    boundary_usd: float = Field(..., ge=0, le=1000, description="The dollar Boundary for this hunt.")
     edits: dict | None = None
 
 
 class ResolveHold(BaseModel):
-    resolution: str
-    edited_text: str | None = None
+    resolution: str = Field(..., max_length=2000)
+    edited_text: str | None = Field(None, max_length=_MAX_INPUT)
 
 
 class ResumeHunt(BaseModel):
-    boundary_usd: float
+    boundary_usd: float = Field(..., ge=0, le=1000)
 
 
 class SaveInstinct(BaseModel):
-    label: str
+    label: str = Field(..., min_length=1, max_length=200)
     spec: dict = Field(default_factory=dict)
 
 
@@ -222,13 +228,13 @@ class HuntSnapshot(BaseModel):
 class AskAlpha(BaseModel):
     # Multi-turn: the conversation so far [{"role": "user"|"assistant", "content": "..."}].
     # `question` is the back-compat single-turn fallback.
-    question: str | None = None
-    messages: list[dict] = Field(default_factory=list)
+    question: str | None = Field(None, max_length=_MAX_TASK)
+    messages: list[dict] = Field(default_factory=list, max_length=200)
 
 
 class IntakeBody(BaseModel):
     # The conversation so far: [{"role": "user"|"assistant", "content": "..."}]
-    messages: list[dict] = Field(default_factory=list)
+    messages: list[dict] = Field(default_factory=list, max_length=200)
 
 
 # The clarify-gate prompt (research-backed: clarify → confirm → run). Alpha decides if there is a
@@ -452,14 +458,14 @@ async def get_hunt(hunt_id: str, request: Request) -> JSONResponse:
 
 
 class HuntPatch(BaseModel):
-    title: str | None = None
+    title: str | None = Field(None, max_length=200)
     archived: bool | None = None
     project_id: str | None = None  # set to a project, or null to unassign (presence checked)
 
 
 class MessageIn(BaseModel):
-    role: str
-    content: str
+    role: Literal["user", "alpha"]
+    content: str = Field(..., max_length=_MAX_INPUT)
 
 
 @app.patch("/hunts/{hunt_id}", tags=["hunts"])
@@ -486,13 +492,13 @@ async def delete_hunt_route(hunt_id: str, request: Request) -> JSONResponse:
 
 
 class ProjectIn(BaseModel):
-    label: str
-    instructions: str | None = None
+    label: str = Field(..., min_length=1, max_length=200)
+    instructions: str | None = Field(None, max_length=10_000)
 
 
 class ProjectPatch(BaseModel):
-    label: str | None = None
-    instructions: str | None = None
+    label: str | None = Field(None, max_length=200)
+    instructions: str | None = Field(None, max_length=10_000)
 
 
 @app.get("/projects", tags=["projects"])
@@ -822,8 +828,8 @@ async def submit_feedback(hunt_id: str, body: FeedbackBody, request: Request) ->
 
 
 class AddInput(BaseModel):
-    text: str = Field(..., description="Text (or parsed document/transcript) to fold into the hunt.")
-    kind: str = Field("text", description="text | pdf | csv | url | audio | video")
+    text: str = Field(..., max_length=_MAX_INPUT, description="Text to fold into the hunt.")
+    kind: InputKind = "text"
 
 
 @app.post(
