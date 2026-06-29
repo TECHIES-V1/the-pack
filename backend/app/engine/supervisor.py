@@ -325,6 +325,59 @@ class Supervisor:
                 )
                 await self._repo.set_hunt_state(self._hunt_id, "failed")
 
+    async def resume_run(self) -> None:
+        """Continue a hunt that survived an engine restart in `halted_boundary` (B11). Events are
+        the source of truth: rebuild the plan, team, and cumulative spend from the log, stay paused,
+        and wait for the Packmaster's `/resume` (a raised Boundary) before re-running the strategy
+        from the saved plan. Re-scouting reuses the search cache, so resuming is cheap, and the prior
+        spend carries over so the Boundary is honored across the restart."""
+        try:
+            await self._rehydrate_from_events()
+            await self._repo.set_hunt_state(self._hunt_id, "halted_boundary")  # stay paused
+            cmd = await self._await_command("resume")  # blocks until the user raises the Boundary
+            raised = float(cmd.get("boundary_usd", self._boundary.boundary_usd))
+            spent = self._boundary.cumulative_usd
+            self._boundary = Boundary(boundary_usd=raised)
+            self._boundary.cumulative_usd = spent
+            await self._repo.set_boundary(self._hunt_id, raised)
+            await self._repo.set_hunt_state(self._hunt_id, "hunting")
+            await self._spawn_roster()
+            await self._open_pack()
+            await self._strategy.execute(self)
+        except StopHunt:
+            with contextlib.suppress(Exception):
+                await self._emit("hunt_stopped", "user", {"by": "user"})
+                await self._repo.set_hunt_state(self._hunt_id, "stopped_by_user")
+        except BoundaryHalt:
+            await self._repo.set_hunt_state(self._hunt_id, "halted_boundary")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - resume must fail as an event, not a crash
+            logging.getLogger("pack").exception("resume of hunt %s failed", self._hunt_id)
+            with contextlib.suppress(Exception):
+                await self._emit(
+                    "hunt_failed", "engine", {"reason_plain_english": f"Resume failed: {exc}"}
+                )
+                await self._repo.set_hunt_state(self._hunt_id, "failed")
+
+    async def _rehydrate_from_events(self) -> None:
+        """Restore plan, team, queries, autonomy mode, and the Boundary's cumulative spend from the
+        hunt's event log so a resumed Supervisor picks up where the prior process left off."""
+        events = await self._repo.replay_events(self._hunt_id, 0)
+        plan_ev = next((e for e in reversed(events) if e.type == "plan_proposed"), None)
+        appr_ev = next((e for e in reversed(events) if e.type == "plan_approved"), None)
+        spent_ev = next((e for e in reversed(events) if e.type == "tokens_spent"), None)
+        if plan_ev is not None:
+            self._plan = dict(plan_ev.payload)
+            self._team = _build_team(plan_ev.payload)
+            self._queries = [str(q).strip() for q in (plan_ev.payload.get("queries") or []) if q]
+        if appr_ev is not None:
+            self._mode = str(appr_ev.payload.get("mode") or "on_signal")
+        base = float((appr_ev.payload.get("boundary_usd") if appr_ev else None) or 0.5)
+        self._boundary = Boundary(boundary_usd=base)
+        if spent_ev is not None:
+            self._boundary.cumulative_usd = float(spent_ev.payload.get("cumulative_usd") or 0)
+
     # --- planning + approval -----------------------------------------------------------
 
     async def _propose_plan(self) -> None:

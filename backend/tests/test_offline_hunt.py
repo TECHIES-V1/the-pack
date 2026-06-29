@@ -13,6 +13,7 @@ strategy-driven); it tests the invariants the contract actually guarantees.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -265,6 +266,35 @@ async def test_memory_recall_is_topic_scoped(monkeypatch: pytest.MonkeyPatch) ->
     unrelated = _run("hunt_m3", "medieval european poetry", repo)
     await asyncio.wait_for(unrelated.run(), timeout=15)
     assert "solid-state battery" not in unrelated._memory_note  # no cross-topic pollution
+
+
+async def test_resume_after_restart_completes_the_hunt() -> None:
+    """B11: a hunt paused at the Boundary survives a 'restart' — a fresh Supervisor rebuilds from the
+    event log, waits for /resume, and runs to completion."""
+    repo = FakeRepo()
+    c1: asyncio.Queue = asyncio.Queue()
+    c1.put_nowait({"type": "approve_plan", "mode": "wild", "boundary_usd": 0.001})  # tiny → halts
+    sup1 = Supervisor(
+        "hunt_resume", Emitter("hunt_resume", repo), repo, QwenClient(), c1,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    t1 = asyncio.create_task(sup1.run())
+    for _ in range(100):  # wait until it pauses at the Boundary
+        if repo.hunts.get("hunt_resume", {}).get("state") == "halted_boundary":
+            break
+        await asyncio.sleep(0.02)
+    assert repo.hunts["hunt_resume"]["state"] == "halted_boundary"
+    t1.cancel()  # simulate the engine dying with the hunt paused
+    with contextlib.suppress(asyncio.CancelledError):
+        await t1
+
+    # Restart: a fresh Supervisor resumes from the event log + a raised Boundary.
+    c2: asyncio.Queue = asyncio.Queue()
+    c2.put_nowait({"type": "resume", "boundary_usd": 1.0})
+    sup2 = Supervisor("hunt_resume", Emitter("hunt_resume", repo), repo, QwenClient(), c2)
+    await asyncio.wait_for(sup2.resume_run(), timeout=20)
+    assert repo.hunts["hunt_resume"]["state"] == "returned"
+    assert any(a["kind"] == "final" for a in repo.artifacts)
 
 
 async def test_refine_redrafts_and_reforges(monkeypatch: pytest.MonkeyPatch) -> None:

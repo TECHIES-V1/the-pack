@@ -59,19 +59,28 @@ from app.qwen.types import CallSpec
 _RESTART_REASON = "The engine restarted before this hunt could finish — start a new one."
 
 
-async def _recover_stranded_hunts(repo: Repo) -> None:
+async def _recover_stranded_hunts(app: FastAPI, repo: Repo) -> None:
     """A previous engine stop leaves in-flight hunts with no Supervisor (state lived in-process). On
-    startup, close each with a terminal `hunt_failed` event so the canvas unfreezes and the Den
-    shows an honest 'couldn't finish' instead of a hunt stuck forever. Best-effort — never blocks
-    startup; a bad row is skipped. (Full cross-restart resume is a v2 item.)"""
+    startup: a hunt that was paused at the Boundary (`halted_boundary`) is RE-REGISTERED and resumed
+    (B11) — it rebuilds from the event log and waits for the Packmaster's /resume. A hunt that died
+    mid-flight can't resume a linear coroutine, so it's closed with an honest `hunt_failed`. Best-
+    effort — never blocks startup; a bad row is skipped."""
+    log = logging.getLogger("pack")
     try:
         stranded = await repo.list_unfinished_hunts()
     except Exception:  # noqa: BLE001 — recovery is best-effort; don't hold up serving
-        logging.getLogger("pack").exception("stranded-hunt recovery failed to list; skipping")
+        log.exception("stranded-hunt recovery failed to list; skipping")
         return
+    registry: HuntRegistry = app.state.registry
     for h in stranded:
         hid = h["hunt_id"]
         try:
+            if h.get("state") == "halted_boundary":  # resumable — re-register and wait for /resume
+                handle = registry.register(hid)
+                sup = Supervisor(hid, Emitter(hid, repo), repo, app.state.client, handle.commands)
+                handle.task = asyncio.create_task(sup.resume_run(), name=f"resume-{hid}")
+                log.info("re-registered halted hunt %s for resume", hid)
+                continue
             seq = (await repo.get_last_seq(hid)) + 1
             await repo.append_event(
                 Event(
@@ -84,7 +93,7 @@ async def _recover_stranded_hunts(repo: Repo) -> None:
             )
             await repo.set_hunt_state(hid, "failed")
         except Exception:  # noqa: BLE001 — skip a bad hunt, keep reconciling the rest
-            logging.getLogger("pack").warning("could not reconcile stranded hunt %s", hid)
+            log.warning("could not reconcile stranded hunt %s", hid)
             continue
 
 
@@ -97,7 +106,6 @@ async def lifespan(app: FastAPI):
     registry = HuntRegistry()
     relay = OutboxRelay(pool, bus, repo)
     await relay.start()
-    await _recover_stranded_hunts(repo)
 
     app.state.pool = pool
     app.state.bus = bus
@@ -105,6 +113,8 @@ async def lifespan(app: FastAPI):
     app.state.registry = registry
     app.state.relay = relay
     app.state.client = QwenClient()
+
+    await _recover_stranded_hunts(app, repo)  # after state is wired (resume re-registers hunts)
 
     try:
         yield
