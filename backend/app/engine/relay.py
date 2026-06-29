@@ -44,15 +44,29 @@ class OutboxRelay:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._listen_conn: asyncpg.Connection | None = None
+        self._listen_lost = False
 
     async def start(self) -> None:
         """Acquire a dedicated LISTEN connection and spin up the drain loop."""
-        self._listen_conn = await self._pool.acquire()
-        await self._listen_conn.add_listener(NOTIFY_CHANNEL, self._on_notify)
+        await self._relisten()
         self._task = asyncio.create_task(self._run(), name="outbox-relay")
+
+    async def _relisten(self) -> None:
+        """(Re)establish the dedicated LISTEN connection. The periodic sweep covers any gap while
+        the live notification path is down, so a dropped Postgres connection only costs latency."""
+        conn = await self._pool.acquire()
+        await conn.add_listener(NOTIFY_CHANNEL, self._on_notify)
+        conn.add_termination_listener(self._on_listen_lost)
+        self._listen_conn = conn
+        self._listen_lost = False
 
     def _on_notify(self, *_args: object) -> None:
         # Fires on the asyncpg event loop; just nudge the loop awake.
+        self._wake.set()
+
+    def _on_listen_lost(self, _conn: object) -> None:
+        # The LISTEN connection dropped — flag a re-listen and wake the loop to do it.
+        self._listen_lost = True
         self._wake.set()
 
     async def _run(self) -> None:
@@ -63,6 +77,9 @@ class OutboxRelay:
             except TimeoutError:
                 pass  # periodic safety sweep
             self._wake.clear()
+            if self._listen_lost:  # reconnect the live path; the sweep bridged the outage
+                with contextlib.suppress(Exception):
+                    await self._relisten()
             try:
                 await self._drain()
             except Exception:  # noqa: BLE001 - the relay must never die on a transient error

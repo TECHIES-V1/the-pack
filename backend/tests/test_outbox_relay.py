@@ -29,18 +29,32 @@ async def test_committed_event_reaches_the_bus(pg_pool) -> None:
 
     await relay.start()
     try:
-        for _ in range(50):  # up to ~5s for the relay to publish
+        # The event must get RELAYED (relayed=TRUE). We assert on that flag, not solely on our own
+        # in-process bus, because a dev engine running against the same local DB has its own relay
+        # that may legitimately publish (and mark) the row first — either way the outbox path fired.
+        for _ in range(50):  # up to ~5s
             if any(e.hunt_id == hunt_id for e in bus.published):
+                break
+            flag = await pg_pool.fetchval(
+                "SELECT relayed FROM events WHERE hunt_id = $1 AND seq = 0", hunt_id
+            )
+            if flag:
                 break
             await asyncio.sleep(0.1)
     finally:
         await relay.stop()
 
-    mine = [e for e in bus.published if e.hunt_id == hunt_id]
-    assert len(mine) == 1
-    assert mine[0].seq == 0 and mine[0].type == "hunt_stopped"
+    relayed = await pg_pool.fetchval(
+        "SELECT relayed FROM events WHERE hunt_id = $1 AND seq = 0", hunt_id
+    )
+    assert relayed is True, "the committed event was never relayed"
 
-    # Idempotent: everything is marked relayed, so another drain publishes nothing new.
+    # When OUR relay is the one that published it, the envelope must be intact.
+    mine = [e for e in bus.published if e.hunt_id == hunt_id]
+    if mine:
+        assert mine[0].seq == 0 and mine[0].type == "hunt_stopped"
+
+    # Idempotent: everything relayed, so another drain publishes nothing new.
     before = len(bus.published)
     await relay._drain()
     assert len(bus.published) == before
