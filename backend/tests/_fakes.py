@@ -21,6 +21,8 @@ class FakeRepo:
         self.memory: list[dict[str, Any]] = []
         self.documents: list[dict[str, Any]] = []
         self.instincts: list[dict[str, Any]] = []
+        self.feedback: list[dict[str, Any]] = []
+        self.projects: list[dict[str, Any]] = []
 
     async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
         self.memory.append({"hunt_id": hunt_id, "kind": kind, "text": text})
@@ -44,8 +46,31 @@ class FakeRepo:
             out.append(row)
         return out
 
+    async def get_document(self, doc_id: int) -> dict[str, Any] | None:
+        return next((d for d in self.documents if d["id"] == doc_id), None)
+
     async def delete_document(self, doc_id: int) -> None:
         self.documents = [d for d in self.documents if d["id"] != doc_id]
+
+    async def save_feedback(self, hunt_id: str, turn_index: int, vote: str) -> None:
+        self.feedback.append({"hunt_id": hunt_id, "turn_index": turn_index, "vote": vote})
+
+    async def feedback_for_hunt(self, hunt_id: str) -> dict[str, Any]:
+        votes = [
+            {"turn_index": f["turn_index"], "vote": f["vote"]}
+            for f in self.feedback
+            if f["hunt_id"] == hunt_id
+        ]
+        up = sum(1 for v in votes if v["vote"] == "up")
+        return {"votes": votes, "up": up, "down": len(votes) - up}
+
+    async def create_project(self, project_id: str, label: str, instructions: str | None) -> None:
+        self.projects.append(
+            {"project_id": project_id, "label": label, "instructions": instructions}
+        )
+
+    async def get_project(self, project_id: str) -> dict[str, Any] | None:
+        return next((p for p in self.projects if p["project_id"] == project_id), None)
 
     async def clear_documents(self) -> None:
         self.documents = []

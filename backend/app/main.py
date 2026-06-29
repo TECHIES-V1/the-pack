@@ -546,6 +546,14 @@ async def list_projects(request: Request) -> dict:
     return {"projects": await _repo(request).list_projects()}
 
 
+@app.get("/projects/{project_id}", tags=["projects"])
+async def get_project_route(project_id: str, request: Request) -> JSONResponse:
+    proj = await _repo(request).get_project(project_id)
+    if proj is None:
+        return JSONResponse(status_code=404, content={"detail": "project not found"})
+    return JSONResponse(content=proj)
+
+
 @app.post("/projects", status_code=202, tags=["projects"])
 async def create_project(body: ProjectIn, request: Request) -> JSONResponse:
     pid = new_project_id()
@@ -866,6 +874,12 @@ async def submit_feedback(hunt_id: str, body: FeedbackBody, request: Request) ->
     return JSONResponse({"ok": True})
 
 
+@app.get("/hunts/{hunt_id}/feedback", tags=["hunts"])
+async def get_feedback(hunt_id: str, request: Request) -> dict:
+    """The votes recorded on a hunt's Alpha turns + up/down tallies (previously write-only)."""
+    return await _repo(request).feedback_for_hunt(hunt_id)
+
+
 class AddInput(BaseModel):
     text: str = Field(..., max_length=_MAX_INPUT, description="Text to fold into the hunt.")
     kind: InputKind = "text"
@@ -1071,6 +1085,15 @@ async def add_document(request: Request, file: UploadFile = File(...)) -> JSONRe
 async def list_documents_route(request: Request) -> dict:
     """Your knowledge-base documents (metadata only, no full text)."""
     return {"documents": await _repo(request).list_documents()}
+
+
+@app.get("/documents/{doc_id}", tags=["documents"])
+async def get_document_route(doc_id: int, request: Request) -> JSONResponse:
+    """One knowledge-base document including its extracted text."""
+    doc = await _repo(request).get_document(doc_id)
+    if doc is None:
+        return JSONResponse(status_code=404, content={"detail": "document not found"})
+    return JSONResponse(content=doc)
 
 
 @app.delete("/documents", tags=["documents"])

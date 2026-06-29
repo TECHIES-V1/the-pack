@@ -69,9 +69,8 @@ def test_bad_request_bodies_are_422() -> None:
 def test_instinct_full_crud() -> None:
     # A1: save -> get -> patch -> delete, with 404s on a missing one.
     client = _client()
-    sid = client.post("/instincts", json={"label": "Deep Research", "spec": {"strategy": "deep_dive"}}).json()[
-        "instinct_id"
-    ]
+    body = {"label": "Deep Research", "spec": {"strategy": "deep_dive"}}
+    sid = client.post("/instincts", json=body).json()["instinct_id"]
     assert client.get(f"/instincts/{sid}").json()["label"] == "Deep Research"
     assert client.patch(f"/instincts/{sid}", json={"label": "Renamed"}).json()["ok"] is True
     assert client.get(f"/instincts/{sid}").json()["label"] == "Renamed"
@@ -79,6 +78,29 @@ def test_instinct_full_crud() -> None:
     assert client.get(f"/instincts/{sid}").status_code == 404
     assert client.patch(f"/instincts/{sid}", json={"label": "x"}).status_code == 404
     assert client.delete(f"/instincts/{sid}").status_code == 404
+
+
+def test_feedback_is_readable() -> None:
+    # A2: votes were write-only; now they read back with tallies.
+    client = _client()
+    client.post("/hunts/h1/feedback", json={"turn_index": 0, "vote": "up"})
+    client.post("/hunts/h1/feedback", json={"turn_index": 2, "vote": "down"})
+    fb = client.get("/hunts/h1/feedback").json()
+    assert fb["up"] == 1 and fb["down"] == 1 and len(fb["votes"]) == 2
+
+
+def test_single_get_document_and_project() -> None:
+    # A4: CRUD symmetry — single-resource reads.
+    client = _client()
+    up = client.post("/documents", files={"file": ("n.txt", b"hello pack", "text/plain")})
+    doc_id = up.json()["id"]
+    got = client.get(f"/documents/{doc_id}").json()
+    assert got["name"] == "n.txt" and "hello pack" in got["text"]
+    assert client.get("/documents/9999").status_code == 404
+
+    pid = client.post("/projects", json={"label": "Research"}).json()["project_id"]
+    assert client.get(f"/projects/{pid}").json()["label"] == "Research"
+    assert client.get("/projects/nope").status_code == 404
 
 
 def test_documents_rejects_empty_text() -> None:

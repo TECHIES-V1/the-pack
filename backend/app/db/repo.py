@@ -122,6 +122,13 @@ class Repo:
 
     # --- projects (workspaces that group hunts) ----------------------------------------
 
+    async def get_project(self, project_id: str) -> dict[str, Any] | None:
+        row = await self._pool.fetchrow(
+            "SELECT project_id, label, instructions, created_at FROM projects WHERE project_id = $1",  # noqa: E501
+            project_id,
+        )
+        return dict(row) if row else None
+
     async def list_projects(self) -> list[dict[str, Any]]:
         rows = await self._pool.fetch(
             """
@@ -465,6 +472,12 @@ class Repo:
         rows = await self._pool.fetch(f"SELECT {cols} FROM documents ORDER BY id DESC")
         return [dict(r) for r in rows]
 
+    async def get_document(self, doc_id: int) -> dict[str, Any] | None:
+        row = await self._pool.fetchrow(
+            "SELECT id, name, kind, text, chars, created_at FROM documents WHERE id = $1", doc_id
+        )
+        return dict(row) if row else None
+
     async def delete_document(self, doc_id: int) -> None:
         await self._pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
 
@@ -528,3 +541,12 @@ class Repo:
             turn_index,
             vote,
         )
+
+    async def feedback_for_hunt(self, hunt_id: str) -> dict[str, Any]:
+        """The votes on a hunt's Alpha turns + up/down tallies (the votes were write-only before)."""
+        rows = await self._pool.fetch(
+            "SELECT turn_index, vote FROM feedback WHERE hunt_id = $1 ORDER BY turn_index", hunt_id
+        )
+        votes = [{"turn_index": r["turn_index"], "vote": r["vote"]} for r in rows]
+        up = sum(1 for v in votes if v["vote"] == "up")
+        return {"votes": votes, "up": up, "down": len(votes) - up}
