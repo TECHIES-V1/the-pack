@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     cors_origins: str = "*"  # comma-separated origin list, or "*"
     max_upload_mb: int = 25  # cap on uploaded files (/documents, /parse, /transcribe) — DoS guard
     db_pool_max_size: int = 10
-    rate_limit_per_min: int = 60  # per-IP cap on expensive endpoints (0 disables)
+    rate_limit_per_min: int = 0  # per-IP cap on expensive POSTs (0 = off; set >0 when exposed)
 
     # Boundary.
     first_hunt_cap_usd: float = 0.50

@@ -19,6 +19,8 @@ import json
 import logging
 import re
 import secrets
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -149,11 +151,12 @@ app = FastAPI(
     ],
 )
 
-# Local dev runs the frontend on :5173 and the engine on :8000 (cross-origin). In prod the
-# nginx in deploy/ makes them same-origin, so this is harmless there. No cookies → "*" is fine.
+# Local dev runs the frontend on :5173 and the engine on :8000 (cross-origin). Default "*" (no
+# cookies, local-only); set PACK_CORS_ORIGINS to a comma list to lock down when exposed.
+_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -165,12 +168,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pack")
 
+# In-process per-IP limiter for expensive POSTs (LLM/upload paths). Off unless rate_limit_per_min>0.
+_RATE_PREFIXES = ("/hunts", "/parse", "/transcribe", "/documents")
+_rate_hits: dict[str, deque[float]] = {}
+
+
+def _rate_limited(ip: str) -> bool:
+    limit = settings.rate_limit_per_min
+    if limit <= 0:
+        return False
+    now = time.monotonic()
+    dq = _rate_hits.setdefault(ip, deque())
+    while dq and now - dq[0] > 60.0:
+        dq.popleft()
+    if len(dq) >= limit:
+        return True
+    dq.append(now)
+    return False
+
 
 @app.middleware("http")
 async def _request_context(request: Request, call_next):
-    """Stamp every request with a short id (logged + returned as X-Request-ID) for tracing."""
+    """Per-IP rate limit on expensive POSTs, then stamp every request with a short id (logged +
+    returned as X-Request-ID) for tracing."""
     rid = secrets.token_hex(4)
     request.state.request_id = rid
+    if request.method == "POST" and request.url.path.startswith(_RATE_PREFIXES):
+        ip = request.client.host if request.client else "?"
+        if _rate_limited(ip):
+            return JSONResponse(
+                status_code=429, content={"detail": "rate limit exceeded", "request_id": rid}
+            )
     response = await call_next(request)
     response.headers["X-Request-ID"] = rid
     logger.info("[%s] %s %s -> %s", rid, request.method, request.url.path, response.status_code)
@@ -433,8 +461,30 @@ class CommandAccepted(BaseModel):
 
 
 @app.get("/health", tags=["system"])
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "pack-engine"}
+async def health(request: Request) -> JSONResponse:
+    """Liveness + dependency probe: pings Postgres and Redis so a probe sees 'degraded', not a
+    false 'ok', when a backing service is down."""
+    detail: dict[str, str] = {"status": "ok", "service": "pack-engine"}
+    try:
+        await request.app.state.pool.fetchval("SELECT 1")
+    except Exception as exc:  # noqa: BLE001
+        detail.update(status="degraded", postgres=f"down: {exc}")
+    try:
+        await request.app.state.bus.ping()
+    except Exception as exc:  # noqa: BLE001
+        detail.update(status="degraded", redis=f"down: {exc}")
+    code = 200 if detail["status"] == "ok" else 503
+    return JSONResponse(status_code=code, content=detail)
+
+
+@app.get("/ready", tags=["system"])
+async def ready(request: Request) -> JSONResponse:
+    """Readiness probe — 503 until Postgres answers (the engine can't serve without it)."""
+    try:
+        await request.app.state.pool.fetchval("SELECT 1")
+    except Exception:  # noqa: BLE001
+        return JSONResponse(status_code=503, content={"ready": False})
+    return JSONResponse({"ready": True})
 
 
 @app.get("/strategies", tags=["system"])
@@ -1049,13 +1099,15 @@ class RefineBody(BaseModel):
 @app.post("/hunts/{hunt_id}/refine", status_code=202, tags=["hunts"])
 async def refine_hunt(hunt_id: str, body: RefineBody, request: Request) -> JSONResponse:
     """Re-draft + re-forge the brief from its existing claims/sources (no re-scout). The new files
-    land on the event stream; the Reward refreshes. 404 if there's no brief, 400 if it had no sources."""
+    land on the event stream; the Reward refreshes. 404 if no brief, 400 if it had no sources."""
     art = await _repo(request).get_final_artifact(hunt_id)
     if art is None:
         return JSONResponse(status_code=404, content={"detail": "no brief to refine yet"})
-    artifact_id = await refine_brief(_repo(request), request.app.state.client, hunt_id, body.instruction)
+    artifact_id = await refine_brief(
+        _repo(request), request.app.state.client, hunt_id, body.instruction
+    )
     if artifact_id is None:
-        return JSONResponse(status_code=400, content={"detail": "this brief has no sources to refine"})
+        return JSONResponse(status_code=400, content={"detail": "no sources to refine"})
     return _accepted({"hunt_id": hunt_id, "artifact_id": artifact_id, "accepted": True})
 
 
@@ -1079,13 +1131,21 @@ async def download_artifact(hunt_id: str, artifact_id: str, request: Request) ->
     b64 = content.get("b64")
     if not b64:
         return JSONResponse(status_code=404, content={"detail": "not a downloadable file"})
+    # Forged files are immutable (a new artifact_id is minted on refine) → strong ETag + 304.
+    etag = f'"{artifact_id}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
     data = base64.b64decode(b64)
     mime = content.get("mime", "application/octet-stream")
     filename = f"pack-brief.{row['kind']}"
     return Response(
         content=data,
         media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "ETag": etag,
+            "Cache-Control": "private, max-age=31536000, immutable",
+        },
     )
 
 
