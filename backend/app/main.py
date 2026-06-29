@@ -993,15 +993,7 @@ async def clear_memory_route(request: Request) -> JSONResponse:
 @app.get("/spend", tags=["hunts"])
 async def get_spend(request: Request) -> dict:
     """Total spend across all hunts + a per-hunt breakdown, read from each hunt's final totals."""
-    repo = _repo(request)
-    by_hunt = await repo.spend_by_hunt()
-    titles = {h["hunt_id"]: h["title"] for h in await repo.list_hunts()}
-    items = [
-        {"hunt_id": hid, "title": titles.get(hid, hid), "cost_usd": round(cost, 4)}
-        for hid, cost in by_hunt.items()
-        if cost > 0
-    ]
-    items.sort(key=lambda x: x["cost_usd"], reverse=True)
+    items = await _repo(request).spend_summary()
     return {"total_usd": round(sum(i["cost_usd"] for i in items), 4), "hunts": items}
 
 

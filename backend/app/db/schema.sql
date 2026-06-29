@@ -126,3 +126,13 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     state         JSONB       NOT NULL DEFAULT '{}'::jsonb,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Read-path indexes (additive). The (hunt_id, seq) PK already covers event replay; these speed the
+-- per-hunt list/download queries, the Den's recency sort, and the /spend hunt_completed scan.
+CREATE INDEX IF NOT EXISTS idx_artifacts_hunt    ON artifacts (hunt_id, kind);
+CREATE INDEX IF NOT EXISTS idx_messages_hunt     ON messages (hunt_id);
+CREATE INDEX IF NOT EXISTS idx_hunts_recent      ON hunts (created_at DESC) WHERE archived = FALSE;
+CREATE INDEX IF NOT EXISTS idx_hunts_project     ON hunts (project_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_hunt  ON checkpoints (hunt_id, at_seq DESC);
+-- /spend reads only the terminal totals event per hunt — a partial index keeps that scan tiny.
+CREATE INDEX IF NOT EXISTS idx_events_completed  ON events (hunt_id, seq DESC) WHERE type = 'hunt_completed';

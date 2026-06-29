@@ -66,12 +66,16 @@ class FakeRepo:
             for hid, h in self.hunts.items()
         ]
 
-    async def spend_by_hunt(self) -> dict[str, float]:
-        out: dict[str, float] = {}
+    async def spend_summary(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         for hid, evs in self.events.items():
             for e in evs:
                 if e.type == "hunt_completed":
-                    out[hid] = float((e.payload.get("totals") or {}).get("cost_usd") or 0)
+                    cost = round(float((e.payload.get("totals") or {}).get("cost_usd") or 0), 4)
+                    if cost > 0:
+                        title = (self.hunts.get(hid, {}) or {}).get("raw_input") or hid
+                        out.append({"hunt_id": hid, "title": title, "cost_usd": cost})
+        out.sort(key=lambda x: x["cost_usd"], reverse=True)
         return out
 
     async def create_hunt(

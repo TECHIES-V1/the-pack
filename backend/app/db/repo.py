@@ -452,15 +452,28 @@ class Repo:
 
     # --- spend (v5.4): real cost per hunt, read from the hunt_completed totals ----------
 
-    async def spend_by_hunt(self) -> dict[str, float]:
+    async def spend_summary(self) -> list[dict[str, Any]]:
+        """Per-hunt cost + title in ONE pass — a LATERAL join to each hunt's terminal totals event
+        (uses the partial idx_events_completed index), replacing the old two-full-scan N+1."""
         rows = await self._pool.fetch(
-            "SELECT hunt_id, payload FROM events WHERE type = 'hunt_completed' ORDER BY seq"
+            """
+            SELECT h.hunt_id,
+                   COALESCE(NULLIF(h.title, ''), h.raw_input, h.hunt_id) AS title,
+                   (e.payload -> 'totals' ->> 'cost_usd')::float        AS cost_usd
+            FROM hunts h
+            JOIN LATERAL (
+                SELECT payload FROM events
+                WHERE hunt_id = h.hunt_id AND type = 'hunt_completed'
+                ORDER BY seq DESC LIMIT 1
+            ) e ON TRUE
+            WHERE (e.payload -> 'totals' ->> 'cost_usd')::float > 0
+            ORDER BY cost_usd DESC
+            """
         )
-        out: dict[str, float] = {}
-        for r in rows:
-            totals = (r["payload"] or {}).get("totals") or {}
-            out[r["hunt_id"]] = float(totals.get("cost_usd") or 0)
-        return out
+        return [
+            {"hunt_id": r["hunt_id"], "title": r["title"], "cost_usd": round(r["cost_usd"], 4)}
+            for r in rows
+        ]
 
     # --- checkpoints (stub now; resume logic NEXT) -------------------------------------
 
