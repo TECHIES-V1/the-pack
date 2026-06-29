@@ -267,6 +267,31 @@ async def test_memory_recall_is_topic_scoped(monkeypatch: pytest.MonkeyPatch) ->
     assert "solid-state battery" not in unrelated._memory_note  # no cross-topic pollution
 
 
+async def test_refine_redrafts_and_reforges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A3: refine re-drafts + re-forges from the stored claims/sources, no re-scout."""
+    from app.engine.refine import refine_brief
+
+    repo = FakeRepo()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_refine", Emitter("hunt_refine", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    before = len(repo.artifacts)
+    new_id = await refine_brief(repo, QwenClient(), "hunt_refine", "make it punchier")
+    assert new_id is not None
+    final = next(a for a in repo.artifacts if a["artifact_id"] == new_id)
+    assert final["content"]["refined"] is True and final["content"]["blocks"]
+    # A fresh final + the forged files were produced.
+    assert len(repo.artifacts) > before
+    kinds = {a["kind"] for a in repo.artifacts if a["produced_by"] == "howler"}
+    assert {"final", "pdf", "docx"} <= kinds
+    assert "forge_completed" in [e.type for e in repo.all_events("hunt_refine")]
+
+
 async def test_seed_team_overrides_beta_sizing() -> None:
     """v5.1: a saved Instinct's formation seeds the team instead of Beta's per-task sizing."""
     repo = FakeRepo()

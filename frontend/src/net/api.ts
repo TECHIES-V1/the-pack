@@ -243,6 +243,11 @@ export const api = {
   getShared: (token: string) =>
     req<{ title: string; content: Record<string, unknown> | null }>(`/share/${token}`),
   getArtifact: (id: string) => req<FinalArtifact>(`/hunts/${id}/artifact`),
+  // v5 A3: re-draft + re-forge the brief from its claims/sources (no re-scout).
+  refine: (id: string, instruction = "") =>
+    post<{ hunt_id: string; artifact_id: string; accepted: boolean }>(`/hunts/${id}/refine`, {
+      instruction,
+    }),
   // v3: the forged files (the Reward's format tabs) + a direct download URL for one of them.
   getArtifacts: (id: string) => req<{ artifacts: ArtifactMeta[] }>(`/hunts/${id}/artifacts`),
   artifactUrl: (id: string, artifactId: string) => `${ENGINE_URL}/hunts/${id}/artifacts/${artifactId}`,

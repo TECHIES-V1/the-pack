@@ -44,6 +44,7 @@ from app.engine.core import Emitter
 from app.engine.ids import new_hunt_id, new_instinct_id, new_project_id
 from app.engine.benchmark import run_benchmark
 from app.engine.registry import HuntRegistry
+from app.engine.refine import refine_brief
 from app.engine.rehearse import rehearse
 from app.engine.relay import OutboxRelay
 from app.engine.strategies import strategy_catalog
@@ -1029,6 +1030,23 @@ async def get_artifact(hunt_id: str, request: Request) -> JSONResponse:
     if artifact is None:
         return JSONResponse(status_code=404, content={"detail": "no final artifact yet"})
     return JSONResponse(content=artifact)
+
+
+class RefineBody(BaseModel):
+    instruction: str = Field("", max_length=2000, description="How to re-angle/tighten the brief.")
+
+
+@app.post("/hunts/{hunt_id}/refine", status_code=202, tags=["hunts"])
+async def refine_hunt(hunt_id: str, body: RefineBody, request: Request) -> JSONResponse:
+    """Re-draft + re-forge the brief from its existing claims/sources (no re-scout). The new files
+    land on the event stream; the Reward refreshes. 404 if there's no brief, 400 if it had no sources."""
+    art = await _repo(request).get_final_artifact(hunt_id)
+    if art is None:
+        return JSONResponse(status_code=404, content={"detail": "no brief to refine yet"})
+    artifact_id = await refine_brief(_repo(request), request.app.state.client, hunt_id, body.instruction)
+    if artifact_id is None:
+        return JSONResponse(status_code=400, content={"detail": "this brief has no sources to refine"})
+    return _accepted({"hunt_id": hunt_id, "artifact_id": artifact_id, "accepted": True})
 
 
 _DOWNLOADABLE = {"md", "html", "pdf", "docx", "xlsx", "pptx", "png"}
