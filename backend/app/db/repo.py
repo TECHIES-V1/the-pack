@@ -75,19 +75,23 @@ class Repo:
         }
 
     async def list_hunts(
-        self, limit: int = 50, project_id: str | None = None
+        self, limit: int = 50, project_id: str | None = None, cursor: str | None = None
     ) -> list[dict[str, Any]]:
         """Most-recent, non-archived hunts first — powers the Den (Past Hunts). Optionally scoped
-        to one project."""
+        to one project; `cursor` (a created_at ISO string) pages backward for infinite scroll. Fetch
+        one extra row so the caller can tell there's a next page."""
         rows = await self._pool.fetch(
             """
             SELECT hunt_id, state, source, raw_input, title, boundary_usd, project_id, created_at
             FROM hunts
-            WHERE archived = FALSE AND ($2::text IS NULL OR project_id = $2)
+            WHERE archived = FALSE
+              AND ($2::text IS NULL OR project_id = $2)
+              AND ($3::text IS NULL OR created_at < $3::text::timestamptz)
             ORDER BY created_at DESC LIMIT $1
             """,
             limit,
             project_id,
+            cursor,
         )
         return [
             {
@@ -543,7 +547,7 @@ class Repo:
         )
 
     async def feedback_for_hunt(self, hunt_id: str) -> dict[str, Any]:
-        """The votes on a hunt's Alpha turns + up/down tallies (the votes were write-only before)."""
+        """A hunt's Alpha-turn votes + up/down tallies (previously write-only)."""
         rows = await self._pool.fetch(
             "SELECT turn_index, vote FROM feedback WHERE hunt_id = $1 ORDER BY turn_index", hunt_id
         )

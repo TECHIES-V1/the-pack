@@ -71,3 +71,19 @@ async def test_spend_summary_reads_terminal_totals(pg_pool) -> None:
     mine = next((r for r in summary if r["hunt_id"] == hunt_id), None)
     assert mine is not None and mine["cost_usd"] == 0.1234
     assert "spend test topic" in mine["title"]
+
+
+async def test_list_hunts_cursor_pagination(pg_pool) -> None:
+    """B4: cursor pages backward through hunts by created_at."""
+    repo = Repo(pg_pool)
+    ids = []
+    for i in range(3):
+        hid = new_hunt_id()
+        await repo.create_hunt(hid, "typed", f"pagination topic {i}")
+        ids.append(hid)
+    page1 = await repo.list_hunts(limit=2)
+    assert len(page1) == 2
+    cursor = page1[-1]["created_at"]
+    page2 = await repo.list_hunts(limit=2, cursor=cursor)
+    # The cursor strictly pages older, so page2 doesn't repeat page1's rows.
+    assert {h["hunt_id"] for h in page1}.isdisjoint({h["hunt_id"] for h in page2})

@@ -78,7 +78,9 @@ class FakeRepo:
     async def clear_memory(self) -> None:
         self.memory = []
 
-    async def list_hunts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+    async def list_hunts(
+        self, limit: int = 50, project_id: str | None = None, cursor: str | None = None
+    ) -> list[dict[str, Any]]:
         return [
             {
                 "hunt_id": hid,

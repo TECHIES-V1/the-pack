@@ -474,9 +474,17 @@ async def create_hunt(body: CreateHunt, request: Request) -> JSONResponse:
 
 
 @app.get("/hunts", tags=["hunts"])
-async def list_hunts(request: Request, project_id: str | None = None) -> dict:
-    """Recent hunts, newest first — the Den's Past Hunts list. Optionally scoped to a project."""
-    return {"hunts": await _repo(request).list_hunts(project_id=project_id)}
+async def list_hunts(
+    request: Request, project_id: str | None = None, cursor: str | None = None, limit: int = 50
+) -> dict:
+    """Recent hunts, newest first — the Den's Past Hunts list. Optionally scoped to a project.
+    Cursor pagination: pass the returned `next_cursor` to page older (null when no more)."""
+    lim = max(1, min(limit, 100))
+    hunts = await _repo(request).list_hunts(limit=lim + 1, project_id=project_id, cursor=cursor)
+    has_more = len(hunts) > lim
+    hunts = hunts[:lim]
+    next_cursor = hunts[-1]["created_at"] if (has_more and hunts) else None
+    return {"hunts": hunts, "next_cursor": next_cursor}
 
 
 @app.get("/hunts/{hunt_id}", response_model=HuntSnapshot, tags=["hunts"])
