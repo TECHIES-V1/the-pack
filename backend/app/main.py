@@ -108,8 +108,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await registry.shutdown()
-        await relay.stop()
+        await registry.shutdown()  # cancel in-flight hunt Supervisors
+        for bg in list(_BACKGROUND):  # cancel tracked fire-and-forget tasks (benchmarks)
+            bg.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await bg
+        await relay.stop()  # final drain so nothing is stranded, then release the listener
         await bus.close()
         await pool.close()
 
