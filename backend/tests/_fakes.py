@@ -20,6 +20,7 @@ class FakeRepo:
         self.artifacts: list[dict[str, Any]] = []
         self.memory: list[dict[str, Any]] = []
         self.documents: list[dict[str, Any]] = []
+        self.instincts: list[dict[str, Any]] = []
 
     async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
         self.memory.append({"hunt_id": hunt_id, "kind": kind, "text": text})
@@ -126,8 +127,31 @@ class FakeRepo:
     ) -> None:
         pass
 
+    async def list_instincts(self) -> list[dict[str, Any]]:
+        return list(reversed(self.instincts))
+
     async def get_instinct(self, instinct_id: str) -> dict[str, Any] | None:
-        return None
+        return next((i for i in self.instincts if i["instinct_id"] == instinct_id), None)
+
+    async def save_instinct(self, instinct_id: str, label: str, spec: dict[str, Any]) -> None:
+        self.instincts.append({"instinct_id": instinct_id, "label": label, "spec": spec})
+
+    async def update_instinct(
+        self, instinct_id: str, label: str | None, spec: dict[str, Any] | None
+    ) -> bool:
+        for i in self.instincts:
+            if i["instinct_id"] == instinct_id:
+                if label is not None:
+                    i["label"] = label
+                if spec is not None:
+                    i["spec"] = spec
+                return True
+        return False
+
+    async def delete_instinct(self, instinct_id: str) -> bool:
+        before = len(self.instincts)
+        self.instincts = [i for i in self.instincts if i["instinct_id"] != instinct_id]
+        return len(self.instincts) < before
 
     def all_events(self, hunt_id: str) -> list[Event]:
         return self.events.get(hunt_id, [])

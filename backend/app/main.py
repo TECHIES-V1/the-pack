@@ -1101,6 +1101,36 @@ async def save_instinct(body: SaveInstinct, request: Request) -> JSONResponse:
     return _accepted({"instinct_id": instinct_id, "accepted": True})
 
 
+class InstinctPatch(BaseModel):
+    label: str | None = Field(None, min_length=1, max_length=200)
+    spec: dict | None = None
+
+
+@app.get("/instincts/{instinct_id}", tags=["instincts"])
+async def get_instinct_route(instinct_id: str, request: Request) -> JSONResponse:
+    inst = await _repo(request).get_instinct(instinct_id)
+    if inst is None:
+        return JSONResponse(status_code=404, content={"detail": "instinct not found"})
+    return JSONResponse(content=inst)
+
+
+@app.patch("/instincts/{instinct_id}", tags=["instincts"])
+async def patch_instinct(instinct_id: str, body: InstinctPatch, request: Request) -> JSONResponse:
+    """Rename a saved instinct or replace its formation/spec."""
+    ok = await _repo(request).update_instinct(instinct_id, body.label, body.spec)
+    if not ok:
+        return JSONResponse(status_code=404, content={"detail": "instinct not found"})
+    return JSONResponse({"instinct_id": instinct_id, "ok": True})
+
+
+@app.delete("/instincts/{instinct_id}", tags=["instincts"])
+async def delete_instinct_route(instinct_id: str, request: Request) -> JSONResponse:
+    ok = await _repo(request).delete_instinct(instinct_id)
+    if not ok:
+        return JSONResponse(status_code=404, content={"detail": "instinct not found"})
+    return JSONResponse({"instinct_id": instinct_id, "deleted": True})
+
+
 @app.post("/parse", tags=["hunts"])
 async def parse_document(
     file: UploadFile | None = File(None), url: str | None = Form(None)

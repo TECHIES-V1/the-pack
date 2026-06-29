@@ -66,6 +66,21 @@ def test_bad_request_bodies_are_422() -> None:
     )
 
 
+def test_instinct_full_crud() -> None:
+    # A1: save -> get -> patch -> delete, with 404s on a missing one.
+    client = _client()
+    sid = client.post("/instincts", json={"label": "Deep Research", "spec": {"strategy": "deep_dive"}}).json()[
+        "instinct_id"
+    ]
+    assert client.get(f"/instincts/{sid}").json()["label"] == "Deep Research"
+    assert client.patch(f"/instincts/{sid}", json={"label": "Renamed"}).json()["ok"] is True
+    assert client.get(f"/instincts/{sid}").json()["label"] == "Renamed"
+    assert client.delete(f"/instincts/{sid}").json()["deleted"] is True
+    assert client.get(f"/instincts/{sid}").status_code == 404
+    assert client.patch(f"/instincts/{sid}", json={"label": "x"}).status_code == 404
+    assert client.delete(f"/instincts/{sid}").status_code == 404
+
+
 def test_documents_rejects_empty_text() -> None:
     client = _client()
     r = client.post("/documents", files={"file": ("blank.txt", b"   ", "text/plain")})

@@ -411,6 +411,30 @@ class Repo:
             spec,
         )
 
+    async def update_instinct(
+        self, instinct_id: str, label: str | None, spec: dict[str, Any] | None
+    ) -> bool:
+        """Patch a saved instinct's label and/or spec. Returns False if it doesn't exist."""
+        row = await self._pool.fetchrow(
+            """
+            UPDATE instincts
+            SET label = COALESCE($2, label), spec = COALESCE($3, spec)
+            WHERE instinct_id = $1
+            RETURNING instinct_id
+            """,
+            instinct_id,
+            label,
+            spec,
+        )
+        return row is not None
+
+    async def delete_instinct(self, instinct_id: str) -> bool:
+        """Delete a saved instinct. Returns False if it didn't exist."""
+        row = await self._pool.fetchrow(
+            "DELETE FROM instincts WHERE instinct_id = $1 RETURNING instinct_id", instinct_id
+        )
+        return row is not None
+
     # --- memory (v2): what the pack learned across hunts (local-only) ------------------
 
     async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:

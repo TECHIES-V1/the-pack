@@ -1,4 +1,4 @@
-"""Registry liveness (backend B7): commands to a finished hunt are rejected, not silently accepted."""
+"""Registry liveness (B7): commands to a finished hunt are rejected, not silently accepted."""
 
 from __future__ import annotations
 

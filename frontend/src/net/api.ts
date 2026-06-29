@@ -294,6 +294,10 @@ export const api = {
   listInstincts: () => req<{ instincts: Instinct[] }>("/instincts"),
   saveInstinct: (label: string, spec: Record<string, unknown>) =>
     post<{ instinct_id: string; accepted: boolean }>("/instincts", { label, spec }),
+  getInstinct: (id: string) => req<Instinct>(`/instincts/${id}`),
+  updateInstinct: (id: string, body: { label?: string; spec?: Record<string, unknown> }) =>
+    patch<{ instinct_id: string; ok: boolean }>(`/instincts/${id}`, body),
+  deleteInstinct: (id: string) => del<{ instinct_id: string; deleted: boolean }>(`/instincts/${id}`),
   exportTracks: (id: string) =>
     req<{ hunt_id: string; events: unknown[]; redacted: boolean }>(
       `/hunts/${id}/tracks/export`,
