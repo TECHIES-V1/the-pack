@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import re
 import secrets
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from openai import APIStatusError, RateLimitError
 from pydantic import BaseModel, Field
 
@@ -63,6 +65,7 @@ async def _recover_stranded_hunts(repo: Repo) -> None:
     try:
         stranded = await repo.list_unfinished_hunts()
     except Exception:  # noqa: BLE001 — recovery is best-effort; don't hold up serving
+        logging.getLogger("pack").exception("stranded-hunt recovery failed to list; skipping")
         return
     for h in stranded:
         hid = h["hunt_id"]
@@ -79,6 +82,7 @@ async def _recover_stranded_hunts(repo: Repo) -> None:
             )
             await repo.set_hunt_state(hid, "failed")
         except Exception:  # noqa: BLE001 — skip a bad hunt, keep reconciling the rest
+            logging.getLogger("pack").warning("could not reconcile stranded hunt %s", hid)
             continue
 
 
@@ -137,6 +141,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- observability + a consistent error envelope --------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s"
+)
+logger = logging.getLogger("pack")
+
+
+@app.middleware("http")
+async def _request_context(request: Request, call_next):
+    """Stamp every request with a short id (logged + returned as X-Request-ID) for tracing."""
+    rid = secrets.token_hex(4)
+    request.state.request_id = rid
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    logger.info("[%s] %s %s -> %s", rid, request.method, request.url.path, response.status_code)
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    rid = getattr(request.state, "request_id", "?")
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail, "request_id": rid}
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+    rid = getattr(request.state, "request_id", "?")
+    logger.exception("[%s] unhandled error on %s %s", rid, request.method, request.url.path)
+    return JSONResponse(
+        status_code=500, content={"detail": "internal server error", "request_id": rid}
+    )
 
 
 # --- helpers ---------------------------------------------------------------------------

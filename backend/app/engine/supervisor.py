@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import logging
 import re
 
 from app.db.repo import Repo
@@ -312,11 +313,15 @@ class Supervisor:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a hunt must fail as an event, not a crash
+            logging.getLogger("pack").exception("hunt %s failed", self._hunt_id)  # keep the trace
             with contextlib.suppress(Exception):
                 await self._emit(
                     "hunt_failed",
                     "engine",
-                    {"reason_plain_english": f"The hunt hit an error: {exc}"},
+                    {
+                        "reason_plain_english": f"The hunt hit an error: {exc}",
+                        "exc": type(exc).__name__,
+                    },
                 )
                 await self._repo.set_hunt_state(self._hunt_id, "failed")
 
