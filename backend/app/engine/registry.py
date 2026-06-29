@@ -35,9 +35,11 @@ class HuntRegistry:
         return self._hunts.get(hunt_id)
 
     async def send(self, hunt_id: str, command: dict[str, Any]) -> bool:
-        """Queue a command for a live hunt. False if the hunt isn't running here."""
+        """Queue a command for a LIVE hunt. False if the hunt isn't running here or its Supervisor
+        has already exited — so a command to a finished hunt is rejected, not silently accepted.
+        (task is None only in the brief window before the task is attached, which is still live.)"""
         handle = self._hunts.get(hunt_id)
-        if handle is None:
+        if handle is None or (handle.task is not None and handle.task.done()):
             return False
         await handle.commands.put(command)
         return True
