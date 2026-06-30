@@ -68,9 +68,9 @@ async def test_relay_publishes_in_seq_order(pg_pool) -> None:
 
     hunt_id = new_hunt_id()
     await repo.create_hunt(hunt_id, "typed", "ordering test")
-    emitter = Emitter(hunt_id, repo)
+    emitter = Emitter(hunt_id, repo, validate=False)
     for i in range(5):
-        await emitter.emit(f"event_type_{i}", "test", {"i": i})
+        await emitter.emit("wolf_progress", "test", {"i": i})
 
     await relay.start()
     try:
@@ -97,9 +97,9 @@ async def test_skip_locked_prevents_double_publish(pg_pool) -> None:
 
     hunt_id = new_hunt_id()
     await repo.create_hunt(hunt_id, "typed", "skip locked test")
-    emitter = Emitter(hunt_id, repo)
-    await emitter.emit("evt_a", "test", {})
-    await emitter.emit("evt_b", "test", {})
+    emitter = Emitter(hunt_id, repo, validate=False)
+    await emitter.emit("wolf_progress", "test", {"turn": 1})
+    await emitter.emit("wolf_progress", "test", {"turn": 2})
 
     relay = OutboxRelay(pg_pool, bus, repo, poll_interval=999)
 
@@ -120,10 +120,10 @@ async def test_at_least_once_redelivers_after_reset(pg_pool) -> None:
 
     hunt_id = new_hunt_id()
     await repo.create_hunt(hunt_id, "typed", "at-least-once test")
-    emitter = Emitter(hunt_id, repo)
-    await emitter.emit("evt_1", "test", {})
-    await emitter.emit("evt_2", "test", {})
-    await emitter.emit("evt_3", "test", {})
+    emitter = Emitter(hunt_id, repo, validate=False)
+    await emitter.emit("wolf_progress", "test", {"n": 1})
+    await emitter.emit("wolf_progress", "test", {"n": 2})
+    await emitter.emit("wolf_progress", "test", {"n": 3})
 
     # First drain — all three are published and marked.
     await relay.start()

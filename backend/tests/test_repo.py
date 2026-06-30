@@ -83,7 +83,7 @@ async def test_list_hunts_cursor_pagination(pg_pool) -> None:
         ids.append(hid)
     page1 = await repo.list_hunts(limit=2)
     assert len(page1) == 2
-    cursor = page1[-1]["created_at"]
+    cursor = f"{page1[-1]['created_at']}|{page1[-1]['hunt_id']}"
     page2 = await repo.list_hunts(limit=2, cursor=cursor)
     # The cursor strictly pages older, so page2 doesn't repeat page1's rows.
     assert {h["hunt_id"] for h in page1}.isdisjoint({h["hunt_id"] for h in page2})
