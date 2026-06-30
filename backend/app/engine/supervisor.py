@@ -277,6 +277,7 @@ class Supervisor:
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
+        self._dispatch_lock = asyncio.Lock()  # serialises check+reserve; think() runs outside
         self._plan: dict = {}
         self._queries: list[str] = []
         self._sources: list[dict] = []
@@ -1153,90 +1154,122 @@ class Supervisor:
         phase: str | None = None,
         response_schema: dict | None = None,
     ) -> CompletionResult:
-        """The one path a model call takes. Per-wolf cap + hunt Boundary gate BEFORE, account AFTER."""
+        """The one path a model call takes. Per-wolf cap + hunt Boundary gate BEFORE, account AFTER.
+
+        Check-and-reserve are atomic under _dispatch_lock so parallel scouts (asyncio.gather in
+        strategies) cannot all clear the gate against the same stale cumulative_usd. wolf.think()
+        runs OUTSIDE the lock so scouts genuinely execute in parallel. Reconcile to actual spend
+        under the lock after think() returns. Halt/resume loop replaces the old recursion.
+        """
         # A wolf already relieved (it blew its own cap at the floor tier) makes no further calls.
         if wolf.wolf_id in self._relieved:
             return self._relieved_result(wolf)
 
-        est = pricing.estimate(wolf.tier)
+        while True:
+            # Declare what to do after the lock is released — avoids any await inside the lock.
+            _cap_downgrade: tuple[str, bool] | None = None
+            _do_relieve = False
+            _do_halt = False
+            _boundary_downgrade: tuple[str, bool] | None = None
+            _warn_info: dict | None = None
+            est: float = 0.0
 
-        # Per-wolf cap (v2): one runaway wolf must not drain the whole hunt. If its next call would
-        # blow its own budget, drop it to the floor tier once; if it would STILL blow the cap there,
-        # relieve it — it stands down and the rest of the pack carries on (never halts the hunt).
-        cap = self._wolf_budget.get(wolf.wolf_id)
-        if cap is not None and self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
-            if wolf.tier != "flash":
-                from_tier, thinking_off = wolf.tier, wolf.thinking
-                wolf.tier, wolf.thinking = "flash", False
+            async with self._dispatch_lock:
+                est = pricing.estimate(wolf.tier)
+
+                # Per-wolf cap: one runaway wolf must not drain the whole hunt. Drop to flash once;
+                # if still over cap, relieve it — pack carries on, hunt never halts for one wolf.
+                cap = self._wolf_budget.get(wolf.wolf_id)
+                if cap is not None and self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+                    if wolf.tier != "flash":
+                        _cap_downgrade = (wolf.tier, wolf.thinking)
+                        wolf.tier, wolf.thinking = "flash", False
+                        est = pricing.estimate("flash")
+                    if self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+                        self._relieved.add(wolf.wolf_id)
+                        _do_relieve = True
+
+                if not _do_relieve:
+                    verdict = self._boundary.check(est)
+                    if verdict is Verdict.HALT:
+                        _do_halt = True
+                    else:
+                        # Boundary downgrade / warn decisions (capture state before reserving)
+                        if verdict is Verdict.DOWNGRADE and wolf.tier != "flash":
+                            _boundary_downgrade = (wolf.tier, wolf.thinking)
+                            wolf.tier, wolf.thinking = "flash", False
+                        if verdict is Verdict.WARN and not self._warned:
+                            self._warned = True
+                            _warn_info = {
+                                "pct": round(self._boundary.projected_pct(est), 2),
+                                "cumulative_usd": round(self._boundary.cumulative_usd, 6),
+                            }
+                        # RESERVE estimated spend atomically — reconciled to actual after think().
+                        self._boundary.cumulative_usd += est
+                        self._wolf_spend[wolf.wolf_id] = (
+                            self._wolf_spend.get(wolf.wolf_id, 0.0) + est
+                        )
+            # Lock released — all I/O happens below.
+
+            if _cap_downgrade:
+                from_tier, thinking_off = _cap_downgrade
                 await self._emit(
                     "boundary_downgrade",
                     "engine",
-                    {
-                        "wolf_id": wolf.wolf_id,
-                        "from_tier": from_tier,
-                        "to_tier": "flash",
-                        "thinking_off": thinking_off,
-                    },
+                    {"wolf_id": wolf.wolf_id, "from_tier": from_tier,
+                     "to_tier": "flash", "thinking_off": thinking_off},
                 )
-                est = pricing.estimate(wolf.tier)
-            if self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
-                self._relieved.add(wolf.wolf_id)
-                await self.progress(
-                    wolf.wolf_id, phase or "thinking", "Hit its budget — standing down."
-                )
+
+            if _do_relieve:
+                await self.progress(wolf.wolf_id, phase or "thinking", "Hit its budget — standing down.")
                 return self._relieved_result(wolf)
 
-        verdict = self._boundary.check(est)
+            if _do_halt:
+                # Halt is a PAUSE: checkpoint, surface the choice, wait for human to raise the
+                # Boundary (resume) or stop. On resume, loop back and re-check the gate.
+                await self._halt()
+                await self._await_resume()
+                continue
 
-        if verdict is Verdict.HALT:
-            # Halt is a PAUSE, not a death: checkpoint, surface the choice, and wait for the human
-            # to raise the Boundary (resume) or stop. On resume, re-check the gate and proceed.
-            await self._halt()
-            await self._await_resume()
-            return await self._dispatch(
-                wolf, intent, context, phase=phase, response_schema=response_schema
+            if _boundary_downgrade:
+                from_tier, thinking_off = _boundary_downgrade
+                await self._emit(
+                    "boundary_downgrade",
+                    "engine",
+                    {"wolf_id": wolf.wolf_id, "from_tier": from_tier,
+                     "to_tier": "flash", "thinking_off": thinking_off},
+                )
+
+            if _warn_info:
+                await self._emit("boundary_warning", "engine", _warn_info)
+
+            on_delta = self._progress_sink(wolf.wolf_id, phase) if (phase and wolf.thinking) else None
+            result = await wolf.think(
+                intent,
+                messages=self._messages(wolf, intent, context),
+                response_schema=response_schema,
+                on_delta=on_delta,
             )
-        if verdict is Verdict.DOWNGRADE and wolf.tier != "flash":
-            from_tier, thinking_off = wolf.tier, wolf.thinking
-            wolf.tier, wolf.thinking = "flash", False
+
+            # RECONCILE: correct reserved estimate to actual spend.
+            async with self._dispatch_lock:
+                delta = result.cost_usd - est
+                self._boundary.cumulative_usd += delta
+                self._wolf_spend[wolf.wolf_id] = self._wolf_spend.get(wolf.wolf_id, 0.0) + delta
+
             await self._emit(
-                "boundary_downgrade",
-                "engine",
-                {"wolf_id": wolf.wolf_id, "from_tier": from_tier, "to_tier": "flash", "thinking_off": thinking_off},
-            )
-        elif verdict is Verdict.WARN and not self._warned:
-            self._warned = True
-            await self._emit(
-                "boundary_warning",
-                "engine",
+                "tokens_spent",
+                wolf.wolf_id,
                 {
-                    "pct": round(self._boundary.projected_pct(est), 2),
+                    "wolf_id": wolf.wolf_id,
+                    "model": result.model,
+                    "in_tokens": result.in_tokens,
+                    "out_tokens": result.out_tokens,
+                    "cost_usd": round(result.cost_usd, 6),
                     "cumulative_usd": round(self._boundary.cumulative_usd, 6),
                 },
             )
-
-        on_delta = self._progress_sink(wolf.wolf_id, phase) if (phase and wolf.thinking) else None
-        result = await wolf.think(
-            intent,
-            messages=self._messages(wolf, intent, context),
-            response_schema=response_schema,
-            on_delta=on_delta,
-        )
-        self._boundary.cumulative_usd += result.cost_usd
-        self._wolf_spend[wolf.wolf_id] = self._wolf_spend.get(wolf.wolf_id, 0.0) + result.cost_usd
-        await self._emit(
-            "tokens_spent",
-            wolf.wolf_id,
-            {
-                "wolf_id": wolf.wolf_id,
-                "model": result.model,
-                "in_tokens": result.in_tokens,
-                "out_tokens": result.out_tokens,
-                "cost_usd": round(result.cost_usd, 6),
-                "cumulative_usd": round(self._boundary.cumulative_usd, 6),
-            },
-        )
-        return result
+            return result
 
     def _relieved_result(self, wolf: Wolf) -> CompletionResult:
         """An empty result for a wolf relieved at its budget cap — no spend, no model call. Callers
@@ -1376,7 +1409,8 @@ class Supervisor:
                 await self._repo.set_boundary(self._hunt_id, self._boundary.boundary_usd)
                 await self._repo.set_hunt_state(self._hunt_id, "hunting")
                 return
-            # ignore anything else while paused
+            # Re-queue anything else (e.g. add_input) so it isn't lost while paused.
+            self._commands.put_nowait(cmd)
 
     async def _halt(self) -> None:
         ckpt = new_checkpoint_id()

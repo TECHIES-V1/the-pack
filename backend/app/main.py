@@ -17,7 +17,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.bus.redis_stream import EventBus
 from app.config import settings
 from app.core.middleware import http_exception_handler, request_context, unhandled_exception_handler
-from app.db.pool import apply_schema, create_pool
+from app.db.migrate import run_migrations
+from app.db.pool import create_pool
 from app.db.repo import Repo
 from app.engine.registry import HuntRegistry
 from app.engine.relay import OutboxRelay
@@ -31,7 +32,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool = await create_pool()
-    await apply_schema(pool)
+    await run_migrations(pool)
     bus = EventBus(settings.redis_url)
     repo = Repo(pool)
     registry = HuntRegistry()

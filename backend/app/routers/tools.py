@@ -1,6 +1,8 @@
 """Parse and transcribe routes — file/URL → text utilities."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -11,6 +13,8 @@ from app.tools.file_parse import detect_kind, parse_bytes, parse_url
 from app.tools.transcribe import TRANSCRIBER
 from app.tools.video import extract_audio
 from app.tools.vision import describe_image
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["hunts"])
 
@@ -24,8 +28,9 @@ async def parse_document(
     if url:
         try:
             text = await parse_url(url)
-        except Exception as exc:  # noqa: BLE001
-            return JSONResponse(status_code=400, content={"detail": f"could not fetch URL: {exc}"})
+        except Exception:  # noqa: BLE001
+            _log.warning("parse_url failed: %s", url, exc_info=True)
+            return JSONResponse(status_code=400, content={"detail": "could not fetch that URL"})
         return JSONResponse({"kind": "url", "text": text, "chars": len(text)})
     if file is not None:
         data = await _read_capped(file)

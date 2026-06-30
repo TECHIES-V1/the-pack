@@ -196,3 +196,63 @@ class CollectingBus:
     async def append(self, event: Event) -> str:
         self.published.append(event)
         return f"{event.seq}-0"
+
+
+class FakeQwenBad:
+    """FakeQwen variant with configurable failure modes for resilience tests.
+
+    Usage::
+
+        bad = FakeQwenBad(fail_on_call=2, mode="rate_limit")
+        monkeypatch.setattr(client, "_fake", bad)
+    """
+
+    def __init__(
+        self,
+        *,
+        fail_on_call: int = 0,
+        mode: str = "none",
+    ) -> None:
+        from app.qwen.fake import FakeQwen
+
+        self._delegate = FakeQwen()
+        self._calls = 0
+        self._fail_on = fail_on_call
+        self._mode = mode  # "none" | "bad_json" | "rate_limit" | "null_parsed"
+
+    async def complete(self, spec, on_delta=None):
+        from openai import RateLimitError
+
+        from app.qwen.types import CompletionResult
+
+        self._calls += 1
+        if self._fail_on and self._calls == self._fail_on:
+            if self._mode == "rate_limit":
+                raise RateLimitError(
+                    "rate limit hit (injected by FakeQwenBad)",
+                    response=None,  # type: ignore[arg-type]
+                    body=None,
+                )
+            if self._mode == "null_parsed":
+                result = await self._delegate.complete(spec, on_delta)
+                return CompletionResult(
+                    text=result.text,
+                    model=result.model,
+                    tier=result.tier,
+                    in_tokens=result.in_tokens,
+                    out_tokens=result.out_tokens,
+                    cost_usd=result.cost_usd,
+                    parsed=None,
+                )
+            if self._mode == "bad_json":
+                result = await self._delegate.complete(spec, on_delta)
+                return CompletionResult(
+                    text="Here is the answer: ```not valid json```",
+                    model=result.model,
+                    tier=result.tier,
+                    in_tokens=result.in_tokens,
+                    out_tokens=result.out_tokens,
+                    cost_usd=result.cost_usd,
+                    parsed=None,
+                )
+        return await self._delegate.complete(spec, on_delta)

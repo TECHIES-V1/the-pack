@@ -56,10 +56,14 @@ class Repo:
         )
 
     async def get_hunt_snapshot(self, hunt_id: str) -> dict[str, Any] | None:
-        """State + last_seq, or None if the hunt does not exist (REST returns 404)."""
+        """State + last_seq in one query (avoids the N+1 that the separate get_last_seq caused)."""
         row = await self._pool.fetchrow(
-            "SELECT hunt_id, state, source, raw_input, strategy, boundary_usd "
-            "FROM hunts WHERE hunt_id = $1",
+            """
+            SELECT hunt_id, state, source, raw_input, strategy, boundary_usd,
+                   (SELECT COALESCE(MAX(seq), 0) FROM events WHERE hunt_id = h.hunt_id) AS last_seq
+            FROM hunts h
+            WHERE hunt_id = $1
+            """,
             hunt_id,
         )
         if row is None:
@@ -71,27 +75,43 @@ class Repo:
             "raw_input": row["raw_input"] or "",
             "strategy": row["strategy"],
             "boundary_usd": row["boundary_usd"],
-            "last_seq": await self.get_last_seq(hunt_id),
+            "last_seq": row["last_seq"],
         }
 
     async def list_hunts(
-        self, limit: int = 50, project_id: str | None = None, cursor: str | None = None
+        self,
+        limit: int = 50,
+        project_id: str | None = None,
+        cursor: str | None = None,
     ) -> list[dict[str, Any]]:
         """Most-recent, non-archived hunts first — powers the Den (Past Hunts). Optionally scoped
-        to one project; `cursor` (a created_at ISO string) pages backward for infinite scroll. Fetch
-        one extra row so the caller can tell there's a next page."""
+        to one project; `cursor` is a composite "{iso_ts}|{hunt_id}" string for stable keyset
+        pagination (avoids skipping rows when two hunts share the same microsecond timestamp).
+        Fetch one extra row so the caller can detect a next page."""
+        cursor_ts: str | None = None
+        cursor_id: str | None = None
+        if cursor:
+            parts = cursor.split("|", 1)
+            if len(parts) == 2:
+                cursor_ts, cursor_id = parts[0], parts[1]
+
         rows = await self._pool.fetch(
             """
             SELECT hunt_id, state, source, raw_input, title, boundary_usd, project_id, created_at
             FROM hunts
             WHERE archived = FALSE
               AND ($2::text IS NULL OR project_id = $2)
-              AND ($3::text IS NULL OR created_at < $3::text::timestamptz)
-            ORDER BY created_at DESC LIMIT $1
+              AND (
+                $3::text IS NULL OR $4::text IS NULL
+                OR (created_at, hunt_id) < ($3::text::timestamptz, $4::text)
+              )
+            ORDER BY created_at DESC, hunt_id DESC
+            LIMIT $1
             """,
             limit,
             project_id,
-            cursor,
+            cursor_ts,
+            cursor_id,
         )
         return [
             {
@@ -119,10 +139,12 @@ class Repo:
         )
 
     async def delete_hunt(self, hunt_id: str) -> None:
-        """Remove a hunt and everything hanging off it."""
-        for tbl in ("messages", "events", "artifacts", "checkpoints"):
-            await self._pool.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
-        await self._pool.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
+        """Remove a hunt and all child rows in a single transaction (no partial deletes)."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                for tbl in ("messages", "events", "artifacts", "checkpoints", "feedback"):
+                    await conn.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
+                await conn.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
 
     # --- projects (workspaces that group hunts) ----------------------------------------
 
@@ -194,16 +216,27 @@ class Repo:
     # --- conversation messages (durable per-hunt chat) ---------------------------------
 
     async def save_message(self, hunt_id: str, role: str, content: str) -> None:
-        seq = await self._pool.fetchval(
-            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE hunt_id = $1", hunt_id
-        )
-        await self._pool.execute(
-            "INSERT INTO messages (hunt_id, seq, role, content) VALUES ($1, $2, $3, $4)",
-            hunt_id,
-            int(seq),
-            role,
-            content,
-        )
+        for _ in range(3):
+            try:
+                async with self._pool.acquire() as conn:
+                    async with conn.transaction():
+                        seq = await conn.fetchval(
+                            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages "
+                            "WHERE hunt_id = $1 FOR UPDATE",
+                            hunt_id,
+                        )
+                        await conn.execute(
+                            "INSERT INTO messages (hunt_id, seq, role, content) "
+                            "VALUES ($1, $2, $3, $4)",
+                            hunt_id,
+                            int(seq),
+                            role,
+                            content,
+                        )
+                return
+            except asyncpg.UniqueViolationError:
+                continue
+        raise RuntimeError(f"save_message: failed after 3 retries for hunt {hunt_id}")
 
     async def list_messages(self, hunt_id: str) -> list[dict[str, str]]:
         rows = await self._pool.fetch(
@@ -270,15 +303,23 @@ class Repo:
                 )
                 await conn.execute("SELECT pg_notify($1, $2)", NOTIFY_CHANNEL, event.hunt_id)
 
-    async def fetch_unrelayed(self, limit: int = 500) -> list[Event]:
-        """Committed-but-unpublished events, in per-hunt seq order (the relay's work list)."""
-        rows = await self._pool.fetch(
+    async def fetch_unrelayed_locked(
+        self, conn: asyncpg.Connection, limit: int = 100
+    ) -> list[Event]:
+        """Fetch unrelayed events with FOR UPDATE SKIP LOCKED using a caller-supplied connection.
+
+        The caller MUST hold an open transaction on `conn` — the lock is held for the duration
+        of that transaction so the relay can XADD and then mark relayed in the same txn.
+        Two relay workers running concurrently will skip each other's locked rows.
+        """
+        rows = await conn.fetch(
             """
             SELECT hunt_id, seq, event_id, ts, type, actor, payload
             FROM events
             WHERE relayed = FALSE
             ORDER BY hunt_id, seq
             LIMIT $1
+            FOR UPDATE SKIP LOCKED
             """,
             limit,
         )
@@ -295,11 +336,11 @@ class Repo:
             for r in rows
         ]
 
-    async def mark_relayed(self, hunt_id: str, seq: int) -> None:
-        await self._pool.execute(
+    async def mark_batch_relayed(self, conn: asyncpg.Connection, events: list[Event]) -> None:
+        """Mark a batch of events as relayed. Must be called on the same open-transaction conn."""
+        await conn.executemany(
             "UPDATE events SET relayed = TRUE WHERE hunt_id = $1 AND seq = $2",
-            hunt_id,
-            seq,
+            [(e.hunt_id, e.seq) for e in events],
         )
 
     async def replay_events(self, hunt_id: str, from_seq: int = 0) -> list[Event]:
@@ -500,14 +541,14 @@ class Repo:
             """
             SELECT h.hunt_id,
                    COALESCE(NULLIF(h.title, ''), h.raw_input, h.hunt_id) AS title,
-                   (e.payload -> 'totals' ->> 'cost_usd')::float        AS cost_usd
+                   COALESCE((e.payload -> 'totals' ->> 'cost_usd')::numeric, 0)::float AS cost_usd
             FROM hunts h
             JOIN LATERAL (
                 SELECT payload FROM events
                 WHERE hunt_id = h.hunt_id AND type = 'hunt_completed'
                 ORDER BY seq DESC LIMIT 1
             ) e ON TRUE
-            WHERE (e.payload -> 'totals' ->> 'cost_usd')::float > 0
+            WHERE COALESCE((e.payload -> 'totals' ->> 'cost_usd')::numeric, 0) > 0
             ORDER BY cost_usd DESC
             """
         )

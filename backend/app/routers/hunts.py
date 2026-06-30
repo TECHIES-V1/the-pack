@@ -135,7 +135,10 @@ async def list_hunts(
     hunts = await repo.list_hunts(limit=limit + 1, project_id=project_id, cursor=cursor)
     has_more = len(hunts) > limit
     hunts = hunts[:limit]
-    next_cursor = hunts[-1]["created_at"] if (has_more and hunts) else None
+    # Composite cursor: "{created_at}|{hunt_id}" — stable across identical timestamps.
+    next_cursor = (
+        f"{hunts[-1]['created_at']}|{hunts[-1]['hunt_id']}" if (has_more and hunts) else None
+    )
     return {"hunts": hunts, "next_cursor": next_cursor}
 
 

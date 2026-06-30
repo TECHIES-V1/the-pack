@@ -36,4 +36,6 @@ def test_docx_parses_to_real_text() -> None:
 def test_non_docx_bytes_degrade_honestly() -> None:
     # Random bytes labelled docx → an honest notice, never garbage prose.
     out = parse_bytes(b"\x00\x01not a real docx\xff", "docx")
-    assert out.startswith("[could not read the document")
+    # _check_zip_bomb detects an invalid ZIP and returns a [rejected: ...] notice;
+    # either prefix satisfies "honest notice, no garbage prose".
+    assert out.startswith("[rejected:") or out.startswith("[could not read the document")

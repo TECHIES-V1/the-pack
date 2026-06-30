@@ -11,10 +11,11 @@ It wakes two ways:
   * a periodic sweep (~1s) — a safety net that catches anything a missed/dropped
     notification left behind, and drains the backlog on startup.
 
-Delivery is AT-LEAST-ONCE: if the process dies between XADD and `mark_relayed`, the row is
-still `relayed = FALSE` and gets republished next pass. That is safe because the frontend
-reducer drops `seq <= lastSeq` (reducer.ts) — a duplicate is a no-op at the read model. So
-we never need (and never pay for) exactly-once.
+Delivery is AT-LEAST-ONCE: _drain runs SELECT FOR UPDATE SKIP LOCKED → XADD → mark relayed all
+inside one Postgres transaction. Two relay workers skip each other's locked rows. If the process
+dies before XADD the txn rolls back and the row stays unrelayed for the next pass. If it dies
+after commit the event is both published and marked — no loss. A duplicate publish (XADD ok,
+commit fail) is a no-op because the frontend reducer drops seq <= lastSeq.
 """
 
 from __future__ import annotations
@@ -87,14 +88,27 @@ class OutboxRelay:
                 continue
 
     async def _drain(self) -> None:
-        """Publish every unrelayed event, in order, until the outbox is empty."""
+        """Publish every unrelayed event, in order, until the outbox is empty.
+
+        One Postgres transaction per batch:
+          1. SELECT FOR UPDATE SKIP LOCKED — prevents two relay workers picking the same rows.
+          2. XADD to Redis (inside the open transaction; if XADD throws, txn rolls back).
+          3. Mark relayed and commit — both happen atomically.
+
+        At-least-once: if the process dies before XADD (step 2), the txn rolls back and the
+        row stays unrelayed → retry next pass. If it dies after commit → already published and
+        marked → safe. The tiny window is: XADD succeeded but commit failed → re-publish on
+        next pass (duplicate, harmless: the frontend reducer drops seq <= lastSeq).
+        """
         while True:
-            batch = await self._repo.fetch_unrelayed()
-            if not batch:
-                return
-            for event in batch:
-                await self._bus.append(event)
-                await self._repo.mark_relayed(event.hunt_id, event.seq)
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    batch = await self._repo.fetch_unrelayed_locked(conn)
+                    if not batch:
+                        return
+                    for event in batch:
+                        await self._bus.append(event)
+                    await self._repo.mark_batch_relayed(conn, batch)
 
     async def stop(self) -> None:
         """Cancel the loop, do one final drain so nothing is stranded, release the conn."""

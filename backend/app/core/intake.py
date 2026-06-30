@@ -130,7 +130,11 @@ def safe_reply(text: str) -> str:
 
 async def stream_tokens(queue: asyncio.Queue, request: Request):
     """Yield SSE `token` frames from the queue until the None sentinel, with ~15s heartbeats
-    and early exit on client disconnect so a vanished client can't pin a task forever."""
+    and early exit on client disconnect so a vanished client can't pin a task forever.
+
+    Disconnect is checked on EVERY token (not just at the heartbeat) so a closed tab stops
+    billing within one token round-trip rather than up to 15 seconds later.
+    """
     while True:
         try:
             delta = await asyncio.wait_for(queue.get(), timeout=15.0)
@@ -140,6 +144,8 @@ async def stream_tokens(queue: asyncio.Queue, request: Request):
             yield ": keep-alive\n\n"
             continue
         if delta is None:
+            return
+        if await request.is_disconnected():
             return
         yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
 
