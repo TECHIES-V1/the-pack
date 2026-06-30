@@ -776,13 +776,34 @@ class Supervisor:
         )
         await self.progress("tracker", "merging", f"Cross-referencing {len(findings)} findings")
 
-        res = await self._dispatch(
-            tracker,
-            "merge",
-            context=self._findings_context(findings),
-            phase="merging",
-            response_schema=MERGE_SCHEMA,
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    tracker,
+                    "merge",
+                    context=self._findings_context(findings),
+                    phase="merging",
+                    response_schema=MERGE_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("tracker", "timeout", None)
+            out_ref = new_artifact_id()
+            sources = [s for f in findings for s in f.sources]
+            sources.extend(await self._absorb_knowledge())
+            await self._emit(
+                "step_completed",
+                "tracker",
+                {"step_id": step_id, "wolf_id": "tracker", "output_ref": out_ref, "confidence": 0.0},
+            )
+            return Merged(
+                summary="(tracker stalled — using scout summaries)",
+                claims=[],
+                conflict=None,
+                output_ref=out_ref,
+                sources=sources,
+            )
         parsed = res.parsed or {}
         summary = str(parsed.get("summary") or res.text or "Merged the findings.")
         claims = [str(c).strip() for c in (parsed.get("claims") or []) if str(c).strip()]
@@ -851,9 +872,16 @@ class Supervisor:
     async def find_gaps(self, merged: Merged) -> list[str]:
         """Tracker names what's still missing — the queries for a second deep-dive round."""
         tracker = self._wolves["tracker"]
-        res = await self._dispatch(
-            tracker, "gaps", context=self._merged_context(merged), phase="thinking", response_schema=GAPS_SCHEMA
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    tracker, "gaps", context=self._merged_context(merged), phase="thinking", response_schema=GAPS_SCHEMA
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("tracker", "timeout", None)
+            return []
         parsed = res.parsed or {}
         return [str(g).strip() for g in (parsed.get("gaps") or []) if str(g).strip()][:2]
 
@@ -866,13 +894,25 @@ class Supervisor:
             {"step_id": "s-critique", "wolf_id": "sentinel", "summary": "Verifying the claims"},
         )
         await self.progress("sentinel", "critiquing", "Checking every claim carries a source")
-        res = await self._dispatch(
-            sentinel,
-            "critique",
-            context=self._merged_context(merged),
-            phase="critiquing",
-            response_schema=CRITIQUE_SCHEMA,
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    sentinel,
+                    "critique",
+                    context=self._merged_context(merged),
+                    phase="critiquing",
+                    response_schema=CRITIQUE_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("sentinel", "timeout", None)
+            await self._emit(
+                "step_completed",
+                "sentinel",
+                {"step_id": "s-critique", "wolf_id": "sentinel", "output_ref": f"art_{self._hunt_id}_critique", "confidence": 0.0},
+            )
+            return CritiqueResult(ok=True, issues=[])
         parsed = res.parsed or {}
         issues = [i for i in (parsed.get("issues") or []) if isinstance(i, dict)]
         await self._emit(
@@ -897,10 +937,16 @@ class Supervisor:
         chal_text = rationale
         chal_wolf = self._wolves.get(challenger)
         if chal_wolf is not None:
-            res = await self._dispatch(
-                chal_wolf, "standoff_challenge", context=f"The claim under challenge: {rationale}", phase="critiquing"
-            )
-            chal_text = res.text or rationale
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        chal_wolf, "standoff_challenge", context=f"The claim under challenge: {rationale}", phase="critiquing"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                chal_text = res.text or rationale
+            except TimeoutError:
+                pass  # chal_text stays as rationale fallback
         await self._emit(
             "standoff_turn", challenger, {"standoff_id": sid, "turn_no": 1, "argument_summary": chal_text[:140]}
         )
@@ -909,10 +955,16 @@ class Supervisor:
         def_text = "Fair — I'll back it with a second source."
         def_wolf = self._wolves.get(defendant)
         if def_wolf is not None:
-            res = await self._dispatch(
-                def_wolf, "standoff_defend", context=f"The challenge to answer: {chal_text}", phase="thinking"
-            )
-            def_text = res.text or def_text
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        def_wolf, "standoff_defend", context=f"The challenge to answer: {chal_text}", phase="thinking"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                def_text = res.text or def_text
+            except TimeoutError:
+                pass  # def_text stays as fallback
         await self._emit(
             "standoff_turn", defendant, {"standoff_id": sid, "turn_no": 2, "argument_summary": def_text[:140]}
         )
@@ -921,10 +973,16 @@ class Supervisor:
         rationale_out = "Keep the claim only once a second source backs it."
         alpha = self._wolves.get("alpha")
         if alpha is not None:
-            res = await self._dispatch(
-                alpha, "standoff_judge", context=f"Challenge: {chal_text}\nDefense: {def_text}", phase="thinking"
-            )
-            rationale_out = res.text or rationale_out
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        alpha, "standoff_judge", context=f"Challenge: {chal_text}\nDefense: {def_text}", phase="thinking"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                rationale_out = res.text or rationale_out
+            except TimeoutError:
+                pass  # rationale_out stays as fallback
         await self._emit(
             "standoff_resolved",
             "alpha",
@@ -991,13 +1049,26 @@ class Supervisor:
             {"step_id": step_id, "wolf_id": "howler", "summary": "Drafting the briefing with citations"},
         )
         await self.progress("howler", "writing", "Drafting the briefing")
-        res = await self._dispatch(
-            howler,
-            "draft",
-            context=self._draft_context(merged, decision),
-            phase="writing",
-            response_schema=DRAFT_SCHEMA,
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    howler,
+                    "draft",
+                    context=self._draft_context(merged, decision),
+                    phase="writing",
+                    response_schema=DRAFT_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("howler", "timeout", None)
+            self._blocks = [{"text": merged.summary, "source_ids": []}]
+            await self._emit(
+                "step_completed",
+                "howler",
+                {"step_id": step_id, "wolf_id": "howler", "output_ref": f"art_{self._hunt_id}_draft", "confidence": 0.0},
+            )
+            return merged.summary
         self._blocks = self._blocks_from(res, self._dedupe_sources(merged.sources))
         await self._emit(
             "step_completed",
