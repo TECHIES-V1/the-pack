@@ -329,7 +329,7 @@ class Supervisor:
         """Continue a hunt that survived an engine restart in `halted_boundary` (B11). Events are
         the source of truth: rebuild the plan, team, and cumulative spend from the log, stay paused,
         and wait for the Packmaster's `/resume` (a raised Boundary) before re-running the strategy
-        from the saved plan. Re-scouting reuses the search cache, so resuming is cheap, and the prior
+        from the saved plan. Re-scouting reuses the search cache, so resuming is cheap; prior
         spend carries over so the Boundary is honored across the restart."""
         try:
             await self._rehydrate_from_events()

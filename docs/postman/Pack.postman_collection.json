@@ -1,65 +1,159 @@
 {
   "info": {
-    "name": "Pack Engine API",
-    "_postman_id": "pack-engine-collection",
-    "description": "Pack -- multi-agent hunt orchestrator. REST command surface for the Python engine.\n\nModel: commands return 202 Accepted with a small ack; the result is never in the HTTP response -- it arrives on the event stream (WS/SSE via the gateway). The exceptions are the read endpoints (GET) and the conversational POST /hunts/intake and POST /hunts/{id}/ask, which reply synchronously.\n\nTypical flow: POST /hunts/intake (clarify) -> POST /hunts (create) -> watch stream -> POST /hunts/{id}/plan/approve -> (/holds/{hold_id}/resolve when a Hold opens) -> returned -> GET /hunts/{id}/artifact.\n\nSet {{baseUrl}} in the environment. 'Create hunt' auto-saves {{huntId}}.",
+    "name": "Pack Engine",
+    "description": "Auto-generated from the FastAPI OpenAPI spec \u2014 do not hand-edit.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [
-    {
-      "key": "baseUrl",
-      "value": "http://localhost:8000"
-    },
-    {
-      "key": "huntId",
-      "value": ""
-    },
-    {
-      "key": "holdId",
-      "value": ""
-    },
-    {
-      "key": "instinctId",
-      "value": ""
-    }
-  ],
   "item": [
     {
-      "name": "System",
+      "name": "documents",
       "item": [
         {
-          "name": "Health",
+          "name": "GET /documents",
           "request": {
             "method": "GET",
-            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/health",
+              "raw": "{{baseUrl}}/documents",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "health"
+                "documents"
               ]
-            },
-            "description": "Liveness probe. Returns {status, service}."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Conversation (front door)",
-      "item": [
+            }
+          }
+        },
         {
-          "name": "Intake -- talk to Alpha (clarify-gate)",
+          "name": "POST /documents",
           "request": {
             "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "DELETE /documents",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /documents/{doc_id}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/documents/{doc_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "{doc_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE /documents/{doc_id}",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/documents/{doc_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "{doc_id}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "hunts",
+      "item": [
+        {
+          "name": "POST /hunts",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /hunts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/intake",
+          "request": {
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/hunts/intake",
               "host": [
@@ -70,383 +164,761 @@
                 "intake"
               ]
             },
-            "description": "Alpha holds a normal conversation and decides if there's a real task yet. Synchronous reply {reply, ready, brief}. ready=false means keep chatting (no hunt, no cost); ready=true means brief is an actionable task -- create a hunt with it. Send the whole conversation so far in messages.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"research the BNPL market in Nigeria and write me a brief\"\n    }\n  ]\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Ask Alpha (about a hunt)",
-          "request": {
-            "method": "POST",
+            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/intake/stream",
+          "request": {
+            "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/ask",
+              "raw": "{{baseUrl}}/hunts/intake/stream",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "hunts",
-                "{{huntId}}",
+                "intake",
+                "stream"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /hunts/{hunt_id}",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "DELETE /hunts/{hunt_id}",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/artifact",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/artifact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "artifact"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/artifacts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "artifacts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/artifacts/{artifact_id}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/artifacts/{artifact_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "artifacts",
+                "{artifact_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/ask",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
                 "ask"
               ]
             },
-            "description": "Ask Alpha a question about the running/finished hunt. Synchronous on-voice reply {reply}. Does not change hunt state.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"question\": \"How's it going so far?\"\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Hunts -- create & inspect",
-      "item": [
-        {
-          "name": "Create hunt",
-          "request": {
-            "method": "POST",
+            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/ask/stream",
+          "request": {
+            "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/hunts",
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/ask/stream",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "hunts"
+                "hunts",
+                "{hunt_id}",
+                "ask",
+                "stream"
               ]
             },
-            "description": "Open a hunt (202). The Supervisor starts planning immediately; watch hunt_created -> plan_proposed on the stream. Provide input (free text, usually Alpha's brief) OR instinct_id to start from a saved Instinct. source is one of typed | spoken | dropped. Saves {{huntId}}.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"input\": \"Research the BNPL market in Nigeria and write a brief.\",\n  \"source\": \"typed\"\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const j = pm.response.json();",
-                  "if (j && j.hunt_id) { pm.collectionVariables.set('huntId', j.hunt_id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List hunts",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts"
-              ]
             },
-            "description": "All hunts (newest first) for the Den."
-          },
-          "response": []
-        },
-        {
-          "name": "Get hunt snapshot",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}"
-              ]
-            },
-            "description": "Current state snapshot {hunt_id, state, last_seq, task} -- used to resume the stream."
-          },
-          "response": []
-        },
-        {
-          "name": "Get final artifact",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/artifact",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}",
-                "artifact"
-              ]
-            },
-            "description": "The deliverable once the hunt has returned (the Return document)."
-          },
-          "response": []
-        },
-        {
-          "name": "Export tracks (event log)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/tracks/export",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}",
-                "tracks",
-                "export"
-              ]
-            },
-            "description": "Full, ordered event log {hunt_id, events[], redacted} -- powers Tracks."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Hunts -- run lifecycle",
-      "item": [
-        {
-          "name": "Approve plan (set Boundary, launch)",
-          "request": {
-            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/benchmark",
+          "request": {
+            "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/plan/approve",
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/benchmark",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "hunts",
-                "{{huntId}}",
+                "{hunt_id}",
+                "benchmark"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/feedback",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "feedback"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/feedback",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "feedback"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/holds/{hold_id}/resolve",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/holds/{hold_id}/resolve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "holds",
+                "{hold_id}",
+                "resolve"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/inputs",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/inputs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "inputs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/messages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "messages"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/messages",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "messages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/plan/approve",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/plan/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
                 "plan",
                 "approve"
               ]
             },
-            "description": "Approve the proposed plan and set the spend Boundary -- the hunt begins (202). mode is one of wild | on_signal | on_command. edits optionally overrides plan assumptions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mode\": \"on_signal\",\n  \"boundary_usd\": 1.0,\n  \"edits\": null\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Resolve a Hold",
-          "request": {
-            "method": "POST",
+            },
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/refine",
+          "request": {
+            "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/holds/{{holdId}}/resolve",
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/refine",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "hunts",
-                "{{huntId}}",
-                "holds",
-                "{{holdId}}",
-                "resolve"
+                "{hunt_id}",
+                "refine"
               ]
             },
-            "description": "Answer the one open Hold so the pack resumes (202). resolution is the chosen option; edited_text optionally supplies corrected text.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"resolution\": \"Use the regulator's figure\",\n  \"edited_text\": null\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Add input mid-hunt",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/inputs",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}",
-                "inputs"
-              ]
             },
-            "description": "Feed new material to a running hunt (202)."
-          },
-          "response": []
-        },
-        {
-          "name": "Stop hunt",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/stop",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}",
-                "stop"
-              ]
-            },
-            "description": "Stop the hunt by the Packmaster's command (202)."
-          },
-          "response": []
-        },
-        {
-          "name": "Resume after Boundary halt",
-          "request": {
-            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/rehearse",
+          "request": {
+            "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/resume",
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/rehearse",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "hunts",
-                "{{huntId}}",
+                "{hunt_id}",
+                "rehearse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/resume",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/resume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
                 "resume"
               ]
             },
-            "description": "Lift a Boundary halt with a new cap and continue (202).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"boundary_usd\": 2.0\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Benchmark -- Lone Wolf vs Pack",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/hunts/{{huntId}}/benchmark",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "hunts",
-                "{{huntId}}",
-                "benchmark"
-              ]
             },
-            "description": "Run the same task single-agent for the Scorecard comparison (202). Stub today."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Den -- Instincts",
-      "item": [
-        {
-          "name": "List instincts",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/instincts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "instincts"
-              ]
-            },
-            "description": "Saved Instincts (reusable hunt templates)."
-          },
-          "response": []
-        },
-        {
-          "name": "Save instinct",
-          "request": {
-            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
-            ],
+            ]
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/scorecard",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/scorecard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "scorecard"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/share",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/share",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "share"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/stop",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "stop"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /hunts/{hunt_id}/tracks/export",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/tracks/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "tracks",
+                "export"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /hunts/{hunt_id}/transcribe",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/hunts/{hunt_id}/transcribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "hunts",
+                "{hunt_id}",
+                "transcribe"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "POST /parse",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/parse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "parse"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /share/{token}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/share/{token}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "share",
+                "{token}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /spend",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/spend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "spend"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /transcribe",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/transcribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transcribe"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "instincts",
+      "item": [
+        {
+          "name": "GET /instincts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/instincts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instincts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /instincts",
+          "request": {
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/instincts",
               "host": [
@@ -456,43 +928,291 @@
                 "instincts"
               ]
             },
-            "description": "Save a hunt setup as a one-tap Instinct. Copy instinct_id from the response.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"The Newsroom\",\n  \"spec\": {\n    \"pattern\": \"research\",\n    \"voice\": \"briefing\"\n  }\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Uploads",
-      "item": [
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
         {
-          "name": "Signed upload URL",
+          "name": "GET /instincts/{instinct_id}",
           "request": {
-            "method": "POST",
-            "header": [],
+            "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/uploads",
+              "raw": "{{baseUrl}}/instincts/{instinct_id}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "uploads"
+                "instincts",
+                "{instinct_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /instincts/{instinct_id}",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/instincts/{instinct_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instincts",
+                "{instinct_id}"
               ]
             },
-            "description": "Get a pre-signed object-store URL for a file drop {upload_url, object_key} (202)."
-          },
-          "response": []
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "DELETE /instincts/{instinct_id}",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/instincts/{instinct_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "instincts",
+                "{instinct_id}"
+              ]
+            }
+          }
         }
       ]
+    },
+    {
+      "name": "memory",
+      "item": [
+        {
+          "name": "GET /memory",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/memory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "memory"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE /memory",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/memory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "memory"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "projects",
+      "item": [
+        {
+          "name": "GET /projects",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /projects",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /projects/{project_id}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/{project_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{project_id}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /projects/{project_id}",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/projects/{project_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{project_id}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "DELETE /projects/{project_id}",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/projects/{project_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "{project_id}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "system",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /ready",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ready"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /strategies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/strategies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "strategies"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
     }
   ]
 }

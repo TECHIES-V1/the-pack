@@ -146,8 +146,11 @@ app = FastAPI(
             "name": "hunts",
             "description": "Create and drive a hunt. Commands are 202; truth is on the stream.",
         },
-        {"name": "instincts", "description": "Saved plan presets (the Den)."},
-        {"name": "system", "description": "Health and meta."},
+        {"name": "projects", "description": "Workspaces that group hunts (the Den)."},
+        {"name": "instincts", "description": "Saved plan/formation presets."},
+        {"name": "documents", "description": "Your local knowledge base."},
+        {"name": "memory", "description": "The Elder's cross-hunt learnings."},
+        {"name": "system", "description": "Health, readiness, and meta."},
     ],
 )
 

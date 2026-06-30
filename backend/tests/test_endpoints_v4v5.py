@@ -7,11 +7,16 @@ manager so the DB-backed lifespan never runs (hermetic, no Postgres needed).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.engine import forge
 from app.main import _DOWNLOADABLE, app
 from app.tools.knowledge import select_relevant
+
+_POSTMAN = Path(__file__).resolve().parents[2] / "docs" / "postman" / "Pack.postman_collection.json"
 
 from ._fakes import FakeRepo
 
@@ -19,6 +24,31 @@ from ._fakes import FakeRepo
 def _client() -> TestClient:
     app.state.repo = FakeRepo()
     return TestClient(app)
+
+
+def test_postman_collection_matches_openapi_routes() -> None:
+    # A5: collection must list the same (method, path) pairs as the live FastAPI spec.
+    # If it drifts, re-run `python -m scripts.gen_postman` to sync it.
+    assert _POSTMAN.exists(), "docs/postman/Pack.postman_collection.json not found — run scripts/gen_postman.py"
+    collection = json.loads(_POSTMAN.read_text(encoding="utf-8"))
+    postman_routes = {
+        (item["request"]["method"], item["request"]["url"]["raw"].replace("{{baseUrl}}", ""))
+        for group in collection["item"]
+        for item in group["item"]
+    }
+    spec = app.openapi()
+    openapi_routes = {
+        (method.upper(), path)
+        for path, methods in spec["paths"].items()
+        for method in methods
+        if method in {"get", "post", "patch", "delete", "put"}
+    }
+    missing_from_postman = openapi_routes - postman_routes
+    assert not missing_from_postman, (
+        f"These live routes are absent from the Postman collection "
+        f"(run scripts/gen_postman.py to fix):\n"
+        + "\n".join(f"  {m} {p}" for m, p in sorted(missing_from_postman))
+    )
 
 
 def test_downloadable_allowlist_matches_forge_renderers() -> None:
