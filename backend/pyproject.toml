@@ -39,6 +39,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008",  # FastAPI's Depends()/File()/Query() in default args is the correct pattern
+]
 
 [tool.black]
 line-length = 100

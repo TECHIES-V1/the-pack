@@ -12,8 +12,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.dependencies import get_background, get_client, get_registry, get_repo
 from app.engine import forge
-from app.main import _DOWNLOADABLE, app
+from app.main import app
+from app.routers.hunts import _DOWNLOADABLE
 from app.tools.knowledge import select_relevant
 
 _POSTMAN = Path(__file__).resolve().parents[2] / "docs" / "postman" / "Pack.postman_collection.json"
@@ -22,7 +24,13 @@ from ._fakes import FakeRepo
 
 
 def _client() -> TestClient:
-    app.state.repo = FakeRepo()
+    fake = FakeRepo()
+    app.dependency_overrides[get_repo] = lambda: fake
+    # Stub the remaining state deps so Depends() resolution never hits app.state in tests.
+    # (FastAPI resolves Depends before body validation, so these must not crash.)
+    app.dependency_overrides[get_registry] = lambda: None
+    app.dependency_overrides[get_client] = lambda: None
+    app.dependency_overrides[get_background] = lambda: set()
     return TestClient(app)
 
 

@@ -9,7 +9,7 @@
       "name": "documents",
       "item": [
         {
-          "name": "List Documents Route  [GET]",
+          "name": "List Documents  [GET]",
           "request": {
             "method": "GET",
             "url": {
@@ -51,7 +51,7 @@
           }
         },
         {
-          "name": "Clear Documents Route  [DELETE]",
+          "name": "Clear Documents  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
@@ -67,7 +67,7 @@
           }
         },
         {
-          "name": "Get Document Route  [GET]",
+          "name": "Get Document  [GET]",
           "request": {
             "method": "GET",
             "url": {
@@ -84,7 +84,7 @@
           }
         },
         {
-          "name": "Delete Document Route  [DELETE]",
+          "name": "Delete Document  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
@@ -186,7 +186,7 @@
                 "intake"
               ]
             },
-            "description": "Front-door clarify-gate: Alpha converses until there's a real task, then signals ready with\na one-line brief. No hunt is created here \u2014 the frontend creates one only when ready=true.",
+            "description": "Front-door clarify-gate: Alpha converses until there's a real task, then signals ready\nwith a one-line brief. No hunt is created here \u2014 the frontend creates one only on ready=true.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"messages\": [\n    {}\n  ]\n}",
@@ -219,7 +219,7 @@
                 "stream"
               ]
             },
-            "description": "SSE variant of /intake \u2014 yields `token` events as text arrives, then a `done` event\nwith the fully-parsed {reply, ready, brief} payload. The frontend streams the reply live\nand only reacts to readiness on the done event.",
+            "description": "SSE variant of /intake \u2014 yields `token` events as text arrives, then a `done` event.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"messages\": [\n    {}\n  ]\n}",
@@ -287,7 +287,7 @@
           }
         },
         {
-          "name": "Delete Hunt Route  [DELETE]",
+          "name": "Delete Hunt  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
@@ -355,7 +355,7 @@
                 ":artifact_id"
               ]
             },
-            "description": "Download one forged file \u2014 base64-decoded, with the right content-type and a filename."
+            "description": "Download one forged file \u2014 base64-decoded, with the right content-type and a filename.\nArtifacts are immutable so we issue a strong ETag and honor If-None-Match \u2192 304."
           }
         },
         {
@@ -373,7 +373,7 @@
                 "ask"
               ]
             },
-            "description": "A side conversation with Alpha about the hunt \u2014 a model call that carries the FULL\nconversation history, so Alpha actually remembers what you've been talking about (NOT\nevent-sourced). Offline this returns FakeQwen's canned reply, so the chat works with no key.",
+            "description": "A side conversation with Alpha about the hunt \u2014 multi-turn, carries the full history.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"question\": \"<value>\",\n  \"messages\": [\n    {}\n  ]\n}",
@@ -440,7 +440,7 @@
                 "benchmark"
               ]
             },
-            "description": "Run the Lone Wolf vs the Pack. Launches a background scorer that runs the task single-agent\nand emits benchmark_started \u2192 benchmark_completed (with the Scorecard) on the hunt's stream."
+            "description": "Run the Lone Wolf vs the Pack. Launches a background scorer."
           }
         },
         {
@@ -458,7 +458,7 @@
                 "feedback"
               ]
             },
-            "description": "Record a thumbs-up or thumbs-down vote for one Alpha turn. Fire-and-forget from the UI.",
+            "description": "Record a thumbs-up or thumbs-down vote for one Alpha turn.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"turn_index\": 0,\n  \"vote\": \"<vote>\"\n}",
@@ -491,7 +491,7 @@
                 "feedback"
               ]
             },
-            "description": "The votes recorded on a hunt's Alpha turns + up/down tallies (previously write-only)."
+            "description": "The votes recorded on a hunt's Alpha turns + up/down tallies."
           }
         },
         {
@@ -544,7 +544,7 @@
                 "inputs"
               ]
             },
-            "description": "Mid-hunt input. The pack absorbs it at the next synthesis step without restarting: the\nSupervisor persists it, emits `input_added`, and weighs it in the merge/draft.",
+            "description": "Mid-hunt input. The pack absorbs it at the next synthesis step without restarting.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"text\": \"<text_to_fold_into_the_hunt>\",\n  \"kind\": \"text\"\n}",
@@ -695,7 +695,7 @@
                 "rehearse"
               ]
             },
-            "description": "Shadow Hunt (safety rail): estimate this team's cost + time before the pack runs. No spend,\nno events \u2014 a pure rehearsal the Plan shows so the Packmaster sees the cost first.",
+            "description": "Shadow Hunt (safety rail): estimate this team's cost + time before the pack runs.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"team\": [\n    {}\n  ],\n  \"strategy\": \"<value>\"\n}",
@@ -728,7 +728,7 @@
                 "resume"
               ]
             },
-            "description": "Resume a Boundary-halted hunt by raising the Boundary. The paused Supervisor lifts the cap\nand continues from exactly where it stopped (the call it was about to make).",
+            "description": "Resume a Boundary-halted hunt by raising the Boundary.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"boundary_usd\": 100.0\n}",
@@ -816,7 +816,7 @@
                 "export"
               ]
             },
-            "description": "Redacted Tracks export \u2014 the full event log for a hunt, with PII masked in every payload\n(emails, phone numbers, card-like digit runs, secret tokens)."
+            "description": "Redacted Tracks export \u2014 the full event log with PII masked in every payload."
           }
         },
         {
@@ -896,22 +896,6 @@
           }
         },
         {
-          "name": "Get Spend  [GET]",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/spend",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "spend"
-              ]
-            },
-            "description": "Total spend across all hunts + a per-hunt breakdown, read from each hunt's final totals."
-          }
-        },
-        {
           "name": "Transcribe  [POST]",
           "request": {
             "method": "POST",
@@ -924,7 +908,7 @@
                 "transcribe"
               ]
             },
-            "description": "Transcribe uploaded audio (or a VIDEO's audio track, v5.7) into text for a new hunt. The\nfrontend then calls createHunt with the transcript. Offline returns a placeholder.",
+            "description": "Transcribe uploaded audio (or a VIDEO's audio track) into text for a new hunt.\nOffline returns a placeholder.",
             "body": {
               "mode": "formdata",
               "formdata": [
@@ -990,7 +974,7 @@
           }
         },
         {
-          "name": "Get Instinct Route  [GET]",
+          "name": "Get Instinct  [GET]",
           "request": {
             "method": "GET",
             "url": {
@@ -1039,7 +1023,7 @@
           }
         },
         {
-          "name": "Delete Instinct Route  [DELETE]",
+          "name": "Delete Instinct  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1077,7 +1061,7 @@
           }
         },
         {
-          "name": "Clear Memory Route  [DELETE]",
+          "name": "Clear Memory  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1090,6 +1074,22 @@
               ]
             },
             "description": "Forget everything the pack learned (wired to Settings \u2192 Clear all saved data)."
+          }
+        },
+        {
+          "name": "Get Spend  [GET]",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/spend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "spend"
+              ]
+            },
+            "description": "Total spend across all hunts + a per-hunt breakdown, read from each hunt's final totals."
           }
         }
       ]
@@ -1145,7 +1145,7 @@
           }
         },
         {
-          "name": "Get Project Route  [GET]",
+          "name": "Get Project  [GET]",
           "request": {
             "method": "GET",
             "url": {
@@ -1194,7 +1194,7 @@
           }
         },
         {
-          "name": "Delete Project Route  [DELETE]",
+          "name": "Delete Project  [DELETE]",
           "request": {
             "method": "DELETE",
             "url": {
