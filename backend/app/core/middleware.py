@@ -44,9 +44,11 @@ async def request_context(request: Request, call_next):
             return JSONResponse(
                 status_code=429, content={"detail": "rate limit exceeded", "request_id": rid}
             )
+    t0 = time.monotonic()
     response = await call_next(request)
+    ms = round((time.monotonic() - t0) * 1000)
     response.headers["X-Request-ID"] = rid
-    logger.info("[%s] %s %s -> %s", rid, request.method, request.url.path, response.status_code)
+    logger.info("[%s] %s %s -> %s  %dms", rid, request.method, request.url.path, response.status_code, ms)
     return response
 
 

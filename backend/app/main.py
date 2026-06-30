@@ -85,7 +85,13 @@ app = FastAPI(
 )
 
 _origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()] or ["*"]
-app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+)
 app.middleware("http")(request_context)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
