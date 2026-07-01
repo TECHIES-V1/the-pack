@@ -43,5 +43,9 @@ class EventBus:
                 out.append(ev)
         return out
 
+    async def ping(self) -> bool:
+        """Liveness probe for the /health endpoint."""
+        return await self._redis.ping()
+
     async def close(self) -> None:
         await self._redis.aclose()

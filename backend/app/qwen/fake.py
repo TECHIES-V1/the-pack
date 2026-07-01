@@ -47,6 +47,7 @@ def _offline_result(intent: str, task: str) -> tuple[str, dict | None]:
     if intent == "plan":
         parsed = {
             "summary": f"A parallel research plan on {task}: range on three angles, merge, draft.",
+            "team": [{"role": "scout", "count": 3}],
             "queries": [
                 f"{task} — overview and key players",
                 f"{task} — latest data and figures",
@@ -108,16 +109,17 @@ def _offline_result(intent: str, task: str) -> tuple[str, dict | None]:
         # The pack should win on depth + citations — that's the whole point of the Scorecard.
         return "Scored both briefings.", {"pack": 0.88, "lone": 0.62}
     if intent == "draft":
-        text = (
-            f"# Briefing: {task}\n\n"
-            f"This briefing summarizes what the pack found on {task}, with sources.\n\n"
-            "## Key points\n"
-            f"- The landscape and the leading players in {task}.\n"
-            f"- The most recent figures the sources agree on.\n"
-            f"- The key risk and what to watch next.\n\n"
-            "Every claim above traces to a scout's cited source."
-        )
-        return text, None
+        # v3: Howler writes TAGGED blocks so each line carries its sources (trace).
+        parsed = {
+            "title": f"Briefing: {task}",
+            "blocks": [
+                {"text": f"What the pack found on {task}, from cited sources.", "source_ids": [1]},
+                {"text": f"The leading players in {task} are taking shape.", "source_ids": [1, 2]},
+                {"text": f"The key risk in {task}, and what changes next.", "source_ids": [2]},
+            ],
+        }
+        text = "\n\n".join(b["text"] for b in parsed["blocks"])
+        return text, parsed
     return f"[offline] {intent} on {task}.", None
 
 

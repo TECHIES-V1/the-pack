@@ -88,6 +88,27 @@ CREATE TABLE IF NOT EXISTS instincts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Memory (v2): what the pack learned across hunts. Local-only, no accounts. The Elder reads recent
+-- entries to seed planning and writes a takeaway when a hunt finishes.
+CREATE TABLE IF NOT EXISTS memory (
+    id         BIGSERIAL   PRIMARY KEY,
+    hunt_id    TEXT,
+    kind       TEXT        NOT NULL DEFAULT 'takeaway',
+    text       TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Knowledge base (v4.2): your own documents, local-only. Parsed to text on upload and injected into
+-- a hunt's research as sources (alongside the web). No object store — the text is what's researched.
+CREATE TABLE IF NOT EXISTS documents (
+    id         BIGSERIAL   PRIMARY KEY,
+    name       TEXT        NOT NULL,
+    kind       TEXT        NOT NULL DEFAULT 'text',
+    text       TEXT        NOT NULL,
+    chars      INTEGER     NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Feedback: thumbs up/down votes on Alpha replies (turn_index matches the chatStore turn array).
 CREATE TABLE IF NOT EXISTS feedback (
     feedback_id TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -105,3 +126,13 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     state         JSONB       NOT NULL DEFAULT '{}'::jsonb,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Read-path indexes (additive). The (hunt_id, seq) PK already covers event replay; these speed the
+-- per-hunt list/download queries, the Den's recency sort, and the /spend hunt_completed scan.
+CREATE INDEX IF NOT EXISTS idx_artifacts_hunt    ON artifacts (hunt_id, kind);
+CREATE INDEX IF NOT EXISTS idx_messages_hunt     ON messages (hunt_id);
+CREATE INDEX IF NOT EXISTS idx_hunts_recent      ON hunts (created_at DESC) WHERE archived = FALSE;
+CREATE INDEX IF NOT EXISTS idx_hunts_project     ON hunts (project_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_hunt  ON checkpoints (hunt_id, at_seq DESC);
+-- /spend reads only the terminal totals event per hunt — a partial index keeps that scan tiny.
+CREATE INDEX IF NOT EXISTS idx_events_completed  ON events (hunt_id, seq DESC) WHERE type = 'hunt_completed';

@@ -1,25 +1,25 @@
-import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
-import { fileURLToPath } from "node:url";
+/// <reference types="vitest" />
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { resolve } from 'path'
+import { fileURLToPath } from 'url'
 
-// The Door is code-split from the Territory (Doc 03 §7). manualChunks keeps the canvas out
-// of the Door's first paint. Using import.meta.url keeps this ESM-safe (no __dirname).
+const __dirname = fileURLToPath(new URL('.', import.meta.url))
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          canvas: ["@xyflow/react", "dagre"],
-        },
-      },
+    alias: {
+      '@': resolve(__dirname, './src'),
     },
   },
-  test: {
-    environment: "node",
-    include: ["src/**/*.test.ts"],
+  server: {
+    port: 5173,
   },
-});
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+  },
+})

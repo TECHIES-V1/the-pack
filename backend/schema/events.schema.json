@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sendthepack.com/schema/events/v1.json",
   "title": "Pack Event Envelope v1",
-  "description": "FROZEN June 12, 2026. The single source of truth and the frontend-backend contract (Doc 04 §3). seq is strictly increasing per hunt; events are append-only and never edited. If it is not an event, it did not happen.",
+  "description": "FROZEN June 12, 2026; extended ADDITIVELY for v2 (new event types + new OPTIONAL payload fields only — never rename or remove). The single source of truth and the frontend-backend contract (Doc 04 §3). seq is strictly increasing per hunt; events are append-only and never edited. If it is not an event, it did not happen.",
   "type": "object",
   "required": ["event_id", "hunt_id", "seq", "ts", "type", "actor", "payload"],
   "properties": {
@@ -37,10 +37,14 @@
     { "if": { "properties": { "type": { "const": "standoff_resolved" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/standoff_resolved" } } } },
     { "if": { "properties": { "type": { "const": "stray_detected" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_detected" } } } },
     { "if": { "properties": { "type": { "const": "stray_recovered" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/stray_recovered" } } } },
+    { "if": { "properties": { "type": { "const": "doctor_dispatched" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/doctor_dispatched" } } } },
+    { "if": { "properties": { "type": { "const": "doctor_healed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/doctor_healed" } } } },
     { "if": { "properties": { "type": { "const": "boundary_warning" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_warning" } } } },
     { "if": { "properties": { "type": { "const": "boundary_downgrade" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_downgrade" } } } },
     { "if": { "properties": { "type": { "const": "boundary_halt" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/boundary_halt" } } } },
     { "if": { "properties": { "type": { "const": "artifact_created" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/artifact_created" } } } },
+    { "if": { "properties": { "type": { "const": "forge_started" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/forge_started" } } } },
+    { "if": { "properties": { "type": { "const": "forge_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/forge_completed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_completed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_completed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_failed" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_failed" } } } },
     { "if": { "properties": { "type": { "const": "hunt_stopped" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/payloads/hunt_stopped" } } } },
@@ -57,8 +61,10 @@
         "hold_opened", "hold_resolved",
         "standoff_opened", "standoff_turn", "standoff_resolved",
         "stray_detected", "stray_recovered",
+        "doctor_dispatched", "doctor_healed",
         "boundary_warning", "boundary_downgrade", "boundary_halt",
         "artifact_created",
+        "forge_started", "forge_completed",
         "hunt_completed", "hunt_failed", "hunt_stopped",
         "benchmark_started", "benchmark_completed"
       ]
@@ -112,7 +118,11 @@
           "pattern": { "enum": ["sequential", "hierarchical", "parallel_then_merge", "standoff"] },
           "assumptions": { "type": "array", "items": { "type": "string" } },
           "est_cost": { "type": "number" },
-          "est_time": { "type": "number" }
+          "est_time": { "type": "number" },
+          "queries": { "type": "array", "items": { "type": "string" }, "description": "Per-scout search angles (additive)." },
+          "strategy": { "type": "string", "description": "Selected research strategy (additive)." },
+          "team": { "type": "array", "description": "v2: the per-task team Alpha builds — [{role,count,tier,thinking,budget_usd}]." },
+          "edges": { "type": "array", "description": "v2: optional formation DAG edges [from_role, to_role]." }
         }
       },
       "plan_edited": {
@@ -133,10 +143,12 @@
         "required": ["wolf_id", "role", "model_tier", "thinking", "prompt_version"],
         "properties": {
           "wolf_id": { "type": "string" },
-          "role": { "enum": ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder"] },
+          "role": { "enum": ["alpha", "beta", "scout", "tracker", "howler", "sentinel", "hunter", "elder", "doctor"] },
           "model_tier": { "enum": ["max", "plus", "flash"] },
           "thinking": { "type": "boolean" },
-          "prompt_version": { "type": "string" }
+          "prompt_version": { "type": "string" },
+          "budget_usd": { "type": ["number", "null"], "description": "v2: this wolf's own spend cap (additive)." },
+          "parent_wolf_id": { "type": ["string", "null"], "description": "v2: set when this wolf is a clone (additive)." }
         }
       },
       "step_started": {
@@ -175,7 +187,7 @@
         "required": ["wolf_id", "phase", "text"],
         "properties": {
           "wolf_id": { "type": "string" },
-          "phase": { "enum": ["thinking", "searching", "reading", "merging", "writing", "critiquing"] },
+          "phase": { "enum": ["thinking", "searching", "reading", "merging", "writing", "critiquing", "forge"] },
           "text": { "type": "string" },
           "tokens": { "type": ["integer", "null"] }
         }
@@ -278,6 +290,27 @@
           "note_plain_english": { "type": "string" }
         }
       },
+      "doctor_dispatched": {
+        "type": "object",
+        "description": "v2: the Doctor heads to a faulted agent to heal it (can clone itself for several).",
+        "required": ["doctor_id", "target_wolf_id"],
+        "properties": {
+          "doctor_id": { "type": "string" },
+          "target_wolf_id": { "type": "string" },
+          "reason": { "type": ["string", "null"] }
+        }
+      },
+      "doctor_healed": {
+        "type": "object",
+        "description": "v2: the Doctor finished healing a faulted agent.",
+        "required": ["doctor_id", "target_wolf_id", "note_plain_english"],
+        "properties": {
+          "doctor_id": { "type": "string" },
+          "target_wolf_id": { "type": "string" },
+          "action": { "type": ["string", "null"] },
+          "note_plain_english": { "type": "string" }
+        }
+      },
       "boundary_warning": {
         "type": "object",
         "required": ["pct", "cumulative_usd"],
@@ -310,9 +343,24 @@
         "required": ["artifact_id", "kind", "produced_by"],
         "properties": {
           "artifact_id": { "type": "string" },
-          "kind": { "enum": ["draft", "final", "scorecard", "transcript"] },
+          "kind": { "enum": ["draft", "final", "scorecard", "transcript", "md", "html", "pdf", "docx", "provenance_map", "xlsx", "pptx", "png"] },
           "produced_by": { "type": "string" },
           "provenance_span_map_ref": { "type": ["string", "null"] }
+        }
+      },
+      "forge_started": {
+        "type": "object",
+        "description": "v2: the Forge began turning the brief into real files.",
+        "required": ["formats"],
+        "properties": { "formats": { "type": "array", "items": { "type": "string" } } }
+      },
+      "forge_completed": {
+        "type": "object",
+        "description": "v2: the Forge finished rendering the files.",
+        "required": ["formats"],
+        "properties": {
+          "formats": { "type": "array", "items": { "type": "string" } },
+          "artifact_ids": { "type": "array", "items": { "type": "string" } }
         }
       },
       "hunt_completed": {

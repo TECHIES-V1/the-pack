@@ -34,8 +34,10 @@ async def create_pool() -> asyncpg.Pool:
         kwargs["ssl"] = settings.postgres_sslmode
     return await asyncpg.create_pool(
         dsn=settings.postgres_url,
-        min_size=1,
-        max_size=10,
+        min_size=5,                         # keep 5 warm; relay holds 1, leaves 4 always ready
+        max_size=settings.db_pool_max_size,
+        command_timeout=60.0,               # headroom for long event replays
+        max_inactive_connection_lifetime=300.0,
         init=_init_connection,
         **kwargs,
     )

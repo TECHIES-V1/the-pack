@@ -191,6 +191,55 @@ async def test_multiprovider_returns_within_budget(monkeypatch):
     assert [h.url for h in res.hits] == ["https://fast.com"]  # slow upstream cancelled at budget
 
 
+async def test_multiprovider_returns_at_soft_deadline_with_ground(monkeypatch):
+    """The fix: once we have ANY ground, don't block on a hung upstream — return at the soft
+    deadline instead of waiting out the whole budget (what was starving parallel scouts)."""
+    import asyncio
+    import time
+
+    import app.tools.search_provider as sp
+
+    monkeypatch.setattr(sp, "_SEARCH_SOFT_S", 0.15)
+    monkeypatch.setattr(sp, "_SEARCH_BUDGET_S", 5.0)  # generous hard ceiling, should NOT be hit
+
+    class _Hung:
+        name = "hung"
+
+        async def search(self, query, *, max_results):
+            await asyncio.sleep(3)
+            return [SearchHit("hung", "https://hung.com", "s")]
+
+    fast = SearchHit("F", "https://fast.com", "s", score=0.5)
+    mp = sp.MultiProvider([_Hung(), _FakeSub([fast])], readers=[])
+    start = time.monotonic()
+    res = await mp.search("q", max_results=8)
+    elapsed = time.monotonic() - start
+    assert [h.url for h in res.hits] == ["https://fast.com"]  # didn't wait on the hung provider
+    assert elapsed < 1.0  # returned at the soft deadline, not the 3s sub / 5s budget
+
+
+async def test_multiprovider_extends_to_budget_when_nothing_fast(monkeypatch):
+    """Desperate path: if nothing returns inside the soft window, wait out the stragglers to the
+    hard ceiling rather than giving up empty."""
+    import asyncio
+
+    import app.tools.search_provider as sp
+
+    monkeypatch.setattr(sp, "_SEARCH_SOFT_S", 0.1)
+    monkeypatch.setattr(sp, "_SEARCH_BUDGET_S", 2.0)
+
+    class _Late:
+        name = "late"
+
+        async def search(self, query, *, max_results):
+            await asyncio.sleep(0.3)  # past the soft window, within the budget
+            return [SearchHit("L", "https://late.com", "s")]
+
+    mp = sp.MultiProvider([_Late()], readers=[])
+    res = await mp.search("q", max_results=8)
+    assert [h.url for h in res.hits] == ["https://late.com"]  # the budget path waited it out
+
+
 def test_offline_fallback_when_no_keys(monkeypatch):
     for k in (
         "search_api_key",

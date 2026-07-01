@@ -56,10 +56,14 @@ class Repo:
         )
 
     async def get_hunt_snapshot(self, hunt_id: str) -> dict[str, Any] | None:
-        """State + last_seq, or None if the hunt does not exist (REST returns 404)."""
+        """State + last_seq in one query (avoids the N+1 that the separate get_last_seq caused)."""
         row = await self._pool.fetchrow(
-            "SELECT hunt_id, state, source, raw_input, strategy, boundary_usd "
-            "FROM hunts WHERE hunt_id = $1",
+            """
+            SELECT hunt_id, state, source, raw_input, strategy, boundary_usd,
+                   (SELECT COALESCE(MAX(seq), 0) FROM events WHERE hunt_id = h.hunt_id) AS last_seq
+            FROM hunts h
+            WHERE hunt_id = $1
+            """,
             hunt_id,
         )
         if row is None:
@@ -71,23 +75,43 @@ class Repo:
             "raw_input": row["raw_input"] or "",
             "strategy": row["strategy"],
             "boundary_usd": row["boundary_usd"],
-            "last_seq": await self.get_last_seq(hunt_id),
+            "last_seq": row["last_seq"],
         }
 
     async def list_hunts(
-        self, limit: int = 50, project_id: str | None = None
+        self,
+        limit: int = 50,
+        project_id: str | None = None,
+        cursor: str | None = None,
     ) -> list[dict[str, Any]]:
         """Most-recent, non-archived hunts first — powers the Den (Past Hunts). Optionally scoped
-        to one project."""
+        to one project; `cursor` is a composite "{iso_ts}|{hunt_id}" string for stable keyset
+        pagination (avoids skipping rows when two hunts share the same microsecond timestamp).
+        Fetch one extra row so the caller can detect a next page."""
+        cursor_ts: str | None = None
+        cursor_id: str | None = None
+        if cursor:
+            parts = cursor.split("|", 1)
+            if len(parts) == 2:
+                cursor_ts, cursor_id = parts[0], parts[1]
+
         rows = await self._pool.fetch(
             """
             SELECT hunt_id, state, source, raw_input, title, boundary_usd, project_id, created_at
             FROM hunts
-            WHERE archived = FALSE AND ($2::text IS NULL OR project_id = $2)
-            ORDER BY created_at DESC LIMIT $1
+            WHERE archived = FALSE
+              AND ($2::text IS NULL OR project_id = $2)
+              AND (
+                $3::text IS NULL OR $4::text IS NULL
+                OR (created_at, hunt_id) < ($3::text::timestamptz, $4::text)
+              )
+            ORDER BY created_at DESC, hunt_id DESC
+            LIMIT $1
             """,
             limit,
             project_id,
+            cursor_ts,
+            cursor_id,
         )
         return [
             {
@@ -115,12 +139,21 @@ class Repo:
         )
 
     async def delete_hunt(self, hunt_id: str) -> None:
-        """Remove a hunt and everything hanging off it."""
-        for tbl in ("messages", "events", "artifacts", "checkpoints"):
-            await self._pool.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
-        await self._pool.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
+        """Remove a hunt and all child rows in a single transaction (no partial deletes)."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                for tbl in ("messages", "events", "artifacts", "checkpoints", "feedback"):
+                    await conn.execute(f"DELETE FROM {tbl} WHERE hunt_id = $1", hunt_id)
+                await conn.execute("DELETE FROM hunts WHERE hunt_id = $1", hunt_id)
 
     # --- projects (workspaces that group hunts) ----------------------------------------
+
+    async def get_project(self, project_id: str) -> dict[str, Any] | None:
+        row = await self._pool.fetchrow(
+            "SELECT project_id, label, instructions, created_at FROM projects WHERE project_id = $1",  # noqa: E501
+            project_id,
+        )
+        return dict(row) if row else None
 
     async def list_projects(self) -> list[dict[str, Any]]:
         rows = await self._pool.fetch(
@@ -183,16 +216,27 @@ class Repo:
     # --- conversation messages (durable per-hunt chat) ---------------------------------
 
     async def save_message(self, hunt_id: str, role: str, content: str) -> None:
-        seq = await self._pool.fetchval(
-            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE hunt_id = $1", hunt_id
-        )
-        await self._pool.execute(
-            "INSERT INTO messages (hunt_id, seq, role, content) VALUES ($1, $2, $3, $4)",
-            hunt_id,
-            int(seq),
-            role,
-            content,
-        )
+        for _ in range(3):
+            try:
+                async with self._pool.acquire() as conn:
+                    async with conn.transaction():
+                        seq = await conn.fetchval(
+                            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages "
+                            "WHERE hunt_id = $1 FOR UPDATE",
+                            hunt_id,
+                        )
+                        await conn.execute(
+                            "INSERT INTO messages (hunt_id, seq, role, content) "
+                            "VALUES ($1, $2, $3, $4)",
+                            hunt_id,
+                            int(seq),
+                            role,
+                            content,
+                        )
+                return
+            except asyncpg.UniqueViolationError:
+                continue
+        raise RuntimeError(f"save_message: failed after 3 retries for hunt {hunt_id}")
 
     async def list_messages(self, hunt_id: str) -> list[dict[str, str]]:
         rows = await self._pool.fetch(
@@ -259,15 +303,23 @@ class Repo:
                 )
                 await conn.execute("SELECT pg_notify($1, $2)", NOTIFY_CHANNEL, event.hunt_id)
 
-    async def fetch_unrelayed(self, limit: int = 500) -> list[Event]:
-        """Committed-but-unpublished events, in per-hunt seq order (the relay's work list)."""
-        rows = await self._pool.fetch(
+    async def fetch_unrelayed_locked(
+        self, conn: asyncpg.Connection, limit: int = 100
+    ) -> list[Event]:
+        """Fetch unrelayed events with FOR UPDATE SKIP LOCKED using a caller-supplied connection.
+
+        The caller MUST hold an open transaction on `conn` — the lock is held for the duration
+        of that transaction so the relay can XADD and then mark relayed in the same txn.
+        Two relay workers running concurrently will skip each other's locked rows.
+        """
+        rows = await conn.fetch(
             """
             SELECT hunt_id, seq, event_id, ts, type, actor, payload
             FROM events
             WHERE relayed = FALSE
             ORDER BY hunt_id, seq
             LIMIT $1
+            FOR UPDATE SKIP LOCKED
             """,
             limit,
         )
@@ -284,11 +336,11 @@ class Repo:
             for r in rows
         ]
 
-    async def mark_relayed(self, hunt_id: str, seq: int) -> None:
-        await self._pool.execute(
+    async def mark_batch_relayed(self, conn: asyncpg.Connection, events: list[Event]) -> None:
+        """Mark a batch of events as relayed. Must be called on the same open-transaction conn."""
+        await conn.executemany(
             "UPDATE events SET relayed = TRUE WHERE hunt_id = $1 AND seq = $2",
-            hunt_id,
-            seq,
+            [(e.hunt_id, e.seq) for e in events],
         )
 
     async def replay_events(self, hunt_id: str, from_seq: int = 0) -> list[Event]:
@@ -357,6 +409,29 @@ class Repo:
             "content": row["content"],
         }
 
+    async def list_artifacts(self, hunt_id: str) -> list[dict[str, Any]]:
+        """All artifacts for a hunt (id + kind) — the Reward's format tabs (v3)."""
+        rows = await self._pool.fetch(
+            "SELECT artifact_id, kind FROM artifacts WHERE hunt_id = $1 ORDER BY created_at",
+            hunt_id,
+        )
+        return [{"artifact_id": r["artifact_id"], "kind": r["kind"]} for r in rows]
+
+    async def get_artifact_row(self, artifact_id: str) -> dict[str, Any] | None:
+        """One artifact by id (for downloading a forged file), or None."""
+        row = await self._pool.fetchrow(
+            "SELECT artifact_id, hunt_id, kind, content FROM artifacts WHERE artifact_id = $1",
+            artifact_id,
+        )
+        if row is None:
+            return None
+        return {
+            "artifact_id": row["artifact_id"],
+            "hunt_id": row["hunt_id"],
+            "kind": row["kind"],
+            "content": row["content"],
+        }
+
     # --- instincts (the Den) -----------------------------------------------------------
 
     async def list_instincts(self) -> list[dict[str, Any]]:
@@ -388,6 +463,100 @@ class Repo:
             spec,
         )
 
+    async def update_instinct(
+        self, instinct_id: str, label: str | None, spec: dict[str, Any] | None
+    ) -> bool:
+        """Patch a saved instinct's label and/or spec. Returns False if it doesn't exist."""
+        row = await self._pool.fetchrow(
+            """
+            UPDATE instincts
+            SET label = COALESCE($2, label), spec = COALESCE($3, spec)
+            WHERE instinct_id = $1
+            RETURNING instinct_id
+            """,
+            instinct_id,
+            label,
+            spec,
+        )
+        return row is not None
+
+    async def delete_instinct(self, instinct_id: str) -> bool:
+        """Delete a saved instinct. Returns False if it didn't exist."""
+        row = await self._pool.fetchrow(
+            "DELETE FROM instincts WHERE instinct_id = $1 RETURNING instinct_id", instinct_id
+        )
+        return row is not None
+
+    # --- memory (v2): what the pack learned across hunts (local-only) ------------------
+
+    async def save_memory(self, hunt_id: str | None, kind: str, text: str) -> None:
+        await self._pool.execute(
+            "INSERT INTO memory (hunt_id, kind, text) VALUES ($1, $2, $3)", hunt_id, kind, text
+        )
+
+    async def recent_memory(self, limit: int = 5) -> list[dict[str, Any]]:
+        rows = await self._pool.fetch(
+            "SELECT hunt_id, kind, text FROM memory ORDER BY id DESC LIMIT $1", limit
+        )
+        return [dict(r) for r in rows]
+
+    # --- knowledge base (your documents, v4.2) -----------------------------------------
+
+    async def save_document(self, name: str, kind: str, text: str) -> int:
+        row = await self._pool.fetchrow(
+            "INSERT INTO documents (name, kind, text, chars) VALUES ($1, $2, $3, $4) RETURNING id",
+            name,
+            kind,
+            text,
+            len(text),
+        )
+        return int(row["id"])
+
+    async def list_documents(self, *, with_text: bool = False) -> list[dict[str, Any]]:
+        cols = "id, name, kind, chars" + (", text" if with_text else "")
+        rows = await self._pool.fetch(f"SELECT {cols} FROM documents ORDER BY id DESC")
+        return [dict(r) for r in rows]
+
+    async def get_document(self, doc_id: int) -> dict[str, Any] | None:
+        row = await self._pool.fetchrow(
+            "SELECT id, name, kind, text, chars, created_at FROM documents WHERE id = $1", doc_id
+        )
+        return dict(row) if row else None
+
+    async def delete_document(self, doc_id: int) -> None:
+        await self._pool.execute("DELETE FROM documents WHERE id = $1", doc_id)
+
+    async def clear_documents(self) -> None:
+        await self._pool.execute("DELETE FROM documents")
+
+    async def clear_memory(self) -> None:
+        await self._pool.execute("DELETE FROM memory")
+
+    # --- spend (v5.4): real cost per hunt, read from the hunt_completed totals ----------
+
+    async def spend_summary(self) -> list[dict[str, Any]]:
+        """Per-hunt cost + title in ONE pass — a LATERAL join to each hunt's terminal totals event
+        (uses the partial idx_events_completed index), replacing the old two-full-scan N+1."""
+        rows = await self._pool.fetch(
+            """
+            SELECT h.hunt_id,
+                   COALESCE(NULLIF(h.title, ''), h.raw_input, h.hunt_id) AS title,
+                   COALESCE((e.payload -> 'totals' ->> 'cost_usd')::numeric, 0)::float AS cost_usd
+            FROM hunts h
+            JOIN LATERAL (
+                SELECT payload FROM events
+                WHERE hunt_id = h.hunt_id AND type = 'hunt_completed'
+                ORDER BY seq DESC LIMIT 1
+            ) e ON TRUE
+            WHERE COALESCE((e.payload -> 'totals' ->> 'cost_usd')::numeric, 0) > 0
+            ORDER BY cost_usd DESC
+            """
+        )
+        return [
+            {"hunt_id": r["hunt_id"], "title": r["title"], "cost_usd": round(r["cost_usd"], 4)}
+            for r in rows
+        ]
+
     # --- checkpoints (stub now; resume logic NEXT) -------------------------------------
 
     async def save_checkpoint(
@@ -417,3 +586,12 @@ class Repo:
             turn_index,
             vote,
         )
+
+    async def feedback_for_hunt(self, hunt_id: str) -> dict[str, Any]:
+        """A hunt's Alpha-turn votes + up/down tallies (previously write-only)."""
+        rows = await self._pool.fetch(
+            "SELECT turn_index, vote FROM feedback WHERE hunt_id = $1 ORDER BY turn_index", hunt_id
+        )
+        votes = [{"turn_index": r["turn_index"], "vote": r["vote"]} for r in rows]
+        up = sum(1 for v in votes if v["vote"] == "up")
+        return {"votes": votes, "up": up, "down": len(votes) - up}

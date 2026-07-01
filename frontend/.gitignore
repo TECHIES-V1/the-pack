@@ -1,11 +1,6 @@
-# frontend (Node) — self-contained ignores
-node_modules/
-.pnpm-store/
-dist/
-.vite/
-*.tsbuildinfo
-
-# secrets / local env — never commit (only VITE_* public config goes in .env.example)
-.env
-.env.*
-!.env.example
+node_modules
+dist
+.env.development
+.env.local
+*.local
+.vite

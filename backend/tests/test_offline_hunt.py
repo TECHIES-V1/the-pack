@@ -13,6 +13,7 @@ strategy-driven); it tests the invariants the contract actually guarantees.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -117,6 +118,373 @@ async def test_offline_critique_opens_a_standoff() -> None:
     # Sentinel challenges the weakest claim, and the standoff resolves cleanly.
     assert any(e.type == "standoff_opened" for e in events)
     assert any(e.type == "standoff_resolved" for e in events)
+
+
+async def test_offline_per_wolf_budget_relieves_a_scout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v2: a scout that would blow its own tiny per-wolf cap stands down — the hunt still finishes
+    (one runaway wolf can't drain or halt the whole hunt)."""
+    from app.engine import supervisor as sup_mod
+
+    tier, thinking, _ = sup_mod._ROLE_SPEC["scout"]
+    monkeypatch.setitem(sup_mod._ROLE_SPEC, "scout", (tier, thinking, 0.001))  # near-zero cap
+
+    repo = FakeRepo()
+    hunt_id = "hunt_offline_relief"
+    emitter = Emitter(hunt_id, repo)
+    client = QwenClient()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, client, commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    events = repo.all_events(hunt_id)
+
+    assert any(wid.startswith("scout") for wid in sup._relieved), "a scout should be relieved"
+    assert events[-1].type == "hunt_completed", "the hunt still finishes despite a relieved scout"
+    # seq stays dense and every event is schema-valid even on the relief path.
+    assert [e.seq for e in events] == list(range(len(events)))
+    validator = Draft202012Validator(load_event_schema())
+    for e in events:
+        assert not list(validator.iter_errors(e.model_dump()))
+
+
+async def test_offline_doctor_heals_faults_and_clones() -> None:
+    """v2: a fault dispatches the Doctor to heal it; a second concurrent fault clones the Doctor."""
+    repo = FakeRepo()
+    hunt_id = "hunt_doctor"
+    emitter = Emitter(hunt_id, repo)
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), asyncio.Queue(),
+        source="typed", raw_input="a topic", strategy="orchestrate",
+    )
+    await sup._stray_event("scout-1", "timeout", None)
+    await sup._stray_event("scout-2", "repeat_fail", None)  # a second fault → the Doctor clones
+    events = repo.all_events(hunt_id)
+    types = [e.type for e in events]
+
+    assert types.count("doctor_dispatched") == 2
+    assert types.count("doctor_healed") == 2
+    spawns = [e.payload for e in events if e.type == "wolf_spawned"]
+    doctors = [p for p in spawns if p["role"] == "doctor"]
+    assert len(doctors) == 2, "the Doctor clones itself for the second fault"
+    assert any(d.get("parent_wolf_id") for d in doctors), "the clone records its parent Doctor"
+    # the Stray path still fires alongside the Doctor, and every event is schema-valid.
+    assert types.count("stray_detected") == 2 and types.count("stray_recovered") == 2
+    validator = Draft202012Validator(load_event_schema())
+    for e in events:
+        assert not list(validator.iter_errors(e.model_dump()))
+
+
+async def test_memory_recall_and_remember_roundtrip() -> None:
+    """v2: local memory recalls empty on a first hunt, then surfaces a written takeaway."""
+    from app.tools.memory import recall, remember
+
+    repo = FakeRepo()
+    assert await recall(repo, "finance") == ""  # nothing learned yet
+    await remember(repo, "h1", "Prefer primary sources for finance topics.")
+    note = await recall(repo, "a finance topic")  # topic-relevant → recalled
+    assert "Prefer primary sources" in note
+    assert await recall(repo, "medieval poetry") == ""  # unrelated topic → not recalled
+
+
+async def test_offline_elder_recalls_and_remembers() -> None:
+    """v2: the Elder appears, recalls seeded memory into planning, and writes a takeaway."""
+    repo = FakeRepo()
+    await repo.save_memory(None, "takeaway", "On the BNPL market: prefer primary sources.")
+    hunt_id = "hunt_elder"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    events = repo.all_events(hunt_id)
+
+    assert any(e.type == "wolf_spawned" and e.payload["role"] == "elder" for e in events)
+    elder = next(e for e in events if e.type == "step_started" and e.payload["wolf_id"] == "elder")
+    assert "Recalled" in elder.payload["summary"], "the seeded memory reached the Elder's recall"
+    assert len(repo.memory) == 2 and any("BNPL" in m["text"] for m in repo.memory)
+
+
+async def test_offline_no_sources_is_honest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v3 (3.0): when search returns nothing, the pack returns an honest notice — never a fabricated
+    brief — and flags the artifact so the Reward shows a clear empty state."""
+    from app.tools import web
+
+    class _Empty:
+        ok = True
+        data = {"hits": []}
+        latency_ms = 5
+
+    async def _empty_run(**_kwargs):
+        return _Empty()
+
+    monkeypatch.setattr(web.WEB_SEARCH, "run", _empty_run)
+
+    repo = FakeRepo()
+    hunt_id = "hunt_nosrc"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="an extremely obscure topic", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    assert final["content"]["no_sources"] is True
+    assert "couldn't find sources" in final["content"]["text"]  # the honest no-results notice
+    assert final["content"]["sources"] == []
+    assert repo.all_events(hunt_id)[-1].type == "hunt_completed"  # still finishes cleanly
+
+
+async def test_memory_recall_is_topic_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v4.1 + review M2: a takeaway is recalled into a RELATED next hunt, but NOT into an unrelated
+    one (global recency would pollute every hunt with irrelevant lessons)."""
+
+    def _run(hunt_id: str, topic: str, repo: FakeRepo) -> Supervisor:
+        commands: asyncio.Queue = asyncio.Queue()
+        commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+        return Supervisor(
+            hunt_id, Emitter(hunt_id, repo), repo, QwenClient(), commands,
+            source="typed", raw_input=topic, strategy="orchestrate",
+        )
+
+    repo = FakeRepo()
+    await asyncio.wait_for(_run("hunt_m1", "the solid-state battery market", repo).run(), timeout=15)
+    assert any(m["kind"] == "takeaway" for m in repo.memory)  # a takeaway was stored
+
+    related = _run("hunt_m2", "solid-state battery supplier costs", repo)
+    await asyncio.wait_for(related.run(), timeout=15)
+    assert "solid-state battery" in related._memory_note  # relevant lesson reached planning
+
+    unrelated = _run("hunt_m3", "medieval european poetry", repo)
+    await asyncio.wait_for(unrelated.run(), timeout=15)
+    assert "solid-state battery" not in unrelated._memory_note  # no cross-topic pollution
+
+
+async def test_resume_after_restart_completes_the_hunt() -> None:
+    """B11: a hunt paused at the Boundary survives a 'restart' — a fresh Supervisor rebuilds from the
+    event log, waits for /resume, and runs to completion."""
+    repo = FakeRepo()
+    c1: asyncio.Queue = asyncio.Queue()
+    c1.put_nowait({"type": "approve_plan", "mode": "wild", "boundary_usd": 0.001})  # tiny → halts
+    sup1 = Supervisor(
+        "hunt_resume", Emitter("hunt_resume", repo), repo, QwenClient(), c1,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    t1 = asyncio.create_task(sup1.run())
+    for _ in range(100):  # wait until it pauses at the Boundary
+        if repo.hunts.get("hunt_resume", {}).get("state") == "halted_boundary":
+            break
+        await asyncio.sleep(0.02)
+    assert repo.hunts["hunt_resume"]["state"] == "halted_boundary"
+    t1.cancel()  # simulate the engine dying with the hunt paused
+    with contextlib.suppress(asyncio.CancelledError):
+        await t1
+
+    # Restart: a fresh Supervisor resumes from the event log + a raised Boundary.
+    c2: asyncio.Queue = asyncio.Queue()
+    c2.put_nowait({"type": "resume", "boundary_usd": 1.0})
+    sup2 = Supervisor("hunt_resume", Emitter("hunt_resume", repo), repo, QwenClient(), c2)
+    await asyncio.wait_for(sup2.resume_run(), timeout=20)
+    assert repo.hunts["hunt_resume"]["state"] == "returned"
+    assert any(a["kind"] == "final" for a in repo.artifacts)
+
+
+async def test_refine_redrafts_and_reforges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A3: refine re-drafts + re-forges from the stored claims/sources, no re-scout."""
+    from app.engine.refine import refine_brief
+
+    repo = FakeRepo()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_refine", Emitter("hunt_refine", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    before = len(repo.artifacts)
+    new_id = await refine_brief(repo, QwenClient(), "hunt_refine", "make it punchier")
+    assert new_id is not None
+    final = next(a for a in repo.artifacts if a["artifact_id"] == new_id)
+    assert final["content"]["refined"] is True and final["content"]["blocks"]
+    # A fresh final + the forged files were produced.
+    assert len(repo.artifacts) > before
+    kinds = {a["kind"] for a in repo.artifacts if a["produced_by"] == "howler"}
+    assert {"final", "pdf", "docx"} <= kinds
+    assert "forge_completed" in [e.type for e in repo.all_events("hunt_refine")]
+
+
+async def test_seed_team_overrides_beta_sizing() -> None:
+    """v5.1: a saved Instinct's formation seeds the team instead of Beta's per-task sizing."""
+    repo = FakeRepo()
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_seed", Emitter("hunt_seed", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="anything at all", strategy="orchestrate",
+        seed_team=[{"role": "scout", "count": 5}],
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+    scouts = [
+        e.payload["wolf_id"]
+        for e in repo.all_events("hunt_seed")
+        if e.type == "wolf_spawned" and e.payload.get("role") == "scout"
+    ]
+    assert len(scouts) == 5  # the seeded 5 scouts, not FakeQwen's default 3
+
+
+async def test_knowledge_base_doc_becomes_a_source() -> None:
+    """v4.2: a relevant library doc is injected into the hunt and shows up as a cited source."""
+    repo = FakeRepo()
+    await repo.save_document(
+        "battery-notes.md",
+        "md",
+        "Internal notes on the solid-state battery market: supplier roadmap and the cost curve.",
+    )
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        "hunt_kb", Emitter("hunt_kb", repo), repo, QwenClient(), commands,
+        source="typed", raw_input="the solid-state battery market", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    all_sources = final["content"]["sources"]
+    libs = [s for s in all_sources if str(s.get("url", "")).startswith("lib://")]
+    webs = [s for s in all_sources if not str(s.get("url", "")).startswith("lib://")]
+    assert libs, "the library doc should appear as a source"
+    assert libs[0]["by"] == "your library"
+    assert webs, "web + library sources coexist (mixed de-dup keeps both)"
+    assert len({s.get("url") for s in all_sources}) == len(all_sources)  # no dupes
+
+
+def test_broaden_keeps_the_subject_and_drops_filler() -> None:
+    """Part 1: _broaden() makes a dry scout's retry query — short, plain, subject preserved."""
+    repo = FakeRepo()
+    sup = Supervisor(
+        "h", Emitter("h", repo), repo, QwenClient(), asyncio.Queue(),
+        source="typed", raw_input="the Qwen3 open-source model family", strategy="orchestrate",
+    )
+    out = sup._broaden("Qwen3 code math variants GitHub release notes")
+    assert out == sup._broaden("Qwen3 code math variants GitHub release notes")  # deterministic
+    low = out.lower()
+    assert "qwen3" in low  # the task subject survives
+    assert "github" not in low and "release" not in low and "notes" not in low  # filler dropped
+    assert 0 < len(out.split()) <= 7  # capped short so it actually returns hits
+
+
+async def test_offline_dry_scout_broadens_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Part 1: when the scouts' first (narrow) angles come back dry, each broadens once and ranges
+    again — so the pack returns with sources instead of collapsing onto a single working scout."""
+    from app.tools import web
+
+    class _R:
+        def __init__(self, hits: list[dict]) -> None:
+            self.ok = True
+            self.data = {"hits": hits}
+            self.latency_ms = 5
+
+    calls = {"n": 0}
+
+    async def _flaky_search(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 3:  # the 3 scouts' first angles return nothing
+            return _R([])
+        n = calls["n"]
+        return _R(
+            [{"title": f"Hit {n}", "url": f"https://example.com/{n}", "snippet": "real ground"}]
+        )
+
+    class _F:
+        ok = False
+        data = {"text": ""}
+        latency_ms = 1
+
+    async def _no_fetch(**_kwargs):
+        return _F()
+
+    monkeypatch.setattr(web.WEB_SEARCH, "run", _flaky_search)
+    monkeypatch.setattr(web.WEB_FETCH, "run", _no_fetch)
+
+    repo = FakeRepo()
+    hunt_id = "hunt_dry"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="a narrow research topic", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    assert final["content"]["no_sources"] is False
+    assert final["content"]["sources"], "the broadened retry recovered real sources"
+    assert calls["n"] > 3, "the dry first pass triggered at least one broaden retry"
+
+
+async def test_offline_draft_is_tagged_with_provenance() -> None:
+    """v3 (3.2): the final brief carries tagged blocks + a block-level provenance map."""
+    repo = FakeRepo()
+    hunt_id = "hunt_prov"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    final = next(a for a in repo.artifacts if a["kind"] == "final")
+    blocks = final["content"]["blocks"]
+    assert blocks and all("text" in b and "source_ids" in b for b in blocks)
+    assert any(b["source_ids"] for b in blocks), "at least one block cites a source"
+
+    prov = next(a for a in repo.artifacts if a["kind"] == "provenance_map")
+    assert prov["content"]["spans"]
+    assert final["content"]["span_map_ref"] == prov["artifact_id"]
+
+
+async def test_offline_forge_renders_real_files() -> None:
+    """v3 (3.4): the Forge turns the brief into real MD/HTML/PDF/DOCX files."""
+    import base64 as b64
+
+    repo = FakeRepo()
+    hunt_id = "hunt_forge"
+    emitter = Emitter(hunt_id, repo)
+    commands: asyncio.Queue = asyncio.Queue()
+    commands.put_nowait({"type": "approve_plan", "mode": "on_signal", "boundary_usd": 1.0})
+    sup = Supervisor(
+        hunt_id, emitter, repo, QwenClient(), commands,
+        source="typed", raw_input="the BNPL market in Nigeria", strategy="orchestrate",
+    )
+    await asyncio.wait_for(sup.run(), timeout=15)
+
+    kinds = {a["kind"] for a in repo.artifacts}
+    assert {"md", "html", "pdf", "docx", "xlsx", "pptx", "png"} <= kinds  # v5.8: broader formats
+
+    def body(kind: str) -> bytes:
+        return b64.b64decode(next(a for a in repo.artifacts if a["kind"] == kind)["content"]["b64"])
+
+    assert body("pdf").startswith(b"%PDF")  # a real PDF
+    assert body("docx").startswith(b"PK")  # docx/xlsx/pptx are OOXML zips
+    assert body("xlsx").startswith(b"PK")
+    assert body("pptx").startswith(b"PK")
+    assert body("png").startswith(b"\x89PNG")  # a real PNG
+    # M1: the export carries its Sources, not just the on-screen Reward.
+    assert "## Sources" in body("md").decode("utf-8")
+    types = [e.type for e in repo.all_events(hunt_id)]
+    assert "forge_started" in types and "forge_completed" in types
 
 
 @pytest.mark.parametrize("strategy", ["orchestrate", "deep_dive", "critique"])

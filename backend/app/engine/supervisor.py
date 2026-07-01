@@ -26,50 +26,155 @@ output), live it's Qwen. Nothing in this file changes when the key lands.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import logging
+import re
 
 from app.db.repo import Repo
 from app.engine.boundary import Boundary, Verdict
 from app.engine.core import Emitter
+from app.engine.forge import MIME, forge
 from app.engine.ids import new_artifact_id, new_checkpoint_id, new_hold_id, new_standoff_id
-from app.engine.stray import StrayDetector
 from app.engine.strategies import Conflict, CritiqueResult, Finding, Merged, get_strategy
 from app.engine.strategies.base import (
     CRITIQUE_SCHEMA,
+    DRAFT_SCHEMA,
     FINDINGS_SCHEMA,
     GAPS_SCHEMA,
     MERGE_SCHEMA,
     PLAN_SCHEMA,
 )
+from app.engine.stray import StrayDetector
 from app.engine.wolves import Wolf
 from app.prompts import load_prompt
 from app.qwen import pricing
 from app.qwen.client import OnDelta, QwenClient
 from app.qwen.types import CompletionResult
+from app.tools.knowledge import select_relevant
+from app.tools.memory import recall, remember
 from app.tools.web import WEB_FETCH, WEB_SEARCH
 
-# The roster. Tiers/thinking are explicit (the canonical fixture values) rather than parsed
-# from prompt frontmatter, which carries prose like "plus / max".
-_ROSTER: list[tuple[str, str, str, bool]] = [
-    ("alpha", "alpha", "max", True),
-    ("beta", "beta", "plus", True),
-    ("scout-1", "scout", "flash", False),
-    ("scout-2", "scout", "flash", False),
-    ("scout-3", "scout", "flash", False),
-    ("tracker", "tracker", "plus", True),
-    ("sentinel", "sentinel", "max", True),
-    ("howler", "howler", "plus", False),
-]
+# v2: Alpha builds the team per task. Each role's tier/thinking/default per-wolf budget cap is fixed
+# here (parsing prose from the prompt frontmatter is unreliable); Beta proposes only the SHAPE — how
+# many scouts, mainly. Alpha + Beta lead every hunt; the support roles always join; scouts vary.
+_ROLE_SPEC: dict[str, tuple[str, bool, float]] = {
+    # role:    (model_tier, thinking, default per-wolf budget cap USD)
+    "alpha": ("max", True, 0.15),
+    "beta": ("plus", True, 0.10),
+    "scout": ("flash", False, 0.10),
+    "tracker": ("plus", True, 0.15),
+    "sentinel": ("max", True, 0.20),
+    "howler": ("plus", False, 0.15),
+    "elder": ("flash", False, 0.05),  # v2 memory agent — wired in Phase 2.6
+    "doctor": ("flash", False, 0.05),  # v2 field medic — heals faulted agents (Phase 2.5)
+}
 
-SCOUT_IDS: list[str] = ["scout-1", "scout-2", "scout-3"]
+# Canvas order: leads → the variable scouts → support (incl. the v2 Elder, the memory agent).
+_LEAD_ROLES = ["alpha", "beta"]
+_SUPPORT_ROLES = ["tracker", "sentinel", "howler", "elder"]
+_DEFAULT_SCOUTS = 3
+_MIN_SCOUTS = 1
+_MAX_SCOUTS = 5
+
+
+def _wolf_ids(role: str, count: int) -> list[str]:
+    """Mint ids for a role. Scouts are always suffixed (scout-1..N, the canonical convention); a
+    singleton of any other role keeps its bare role name; clones get -1..-N."""
+    if role == "scout":
+        return [f"scout-{i + 1}" for i in range(max(1, count))]
+    if count <= 1:
+        return [role]
+    return [f"{role}-{i + 1}" for i in range(count)]
+
+
+def _build_team(parsed: dict) -> list[dict]:
+    """Beta proposes the SHAPE (mainly scout count); expand to the canonical team — each role's
+    tier/thinking/budget filled from _ROLE_SPEC. Alpha + Beta always lead (×1); scouts vary 1..5;
+    support roles default to 1 but honor a higher requested count (a cloned tracker, 1..3)."""
+    proposed = {
+        str(e.get("role")): int(e.get("count") or 0)
+        for e in (parsed.get("team") or [])
+        if isinstance(e, dict)
+    }
+    team: list[dict] = []
+    for role in [*_LEAD_ROLES, "scout", *_SUPPORT_ROLES]:
+        tier, thinking, budget = _ROLE_SPEC[role]
+        if role in _LEAD_ROLES:
+            count = 1
+        elif role == "scout":
+            want = proposed.get("scout", _DEFAULT_SCOUTS) or _DEFAULT_SCOUTS
+            count = max(_MIN_SCOUTS, min(_MAX_SCOUTS, want))
+        else:
+            count = max(1, min(3, proposed.get(role, 1) or 1))
+        team.append({
+            "role": role,
+            "count": count,
+            "tier": tier,
+            "thinking": thinking,
+            "budget_usd": round(budget, 4),
+        })
+    return team
+
+
+def _roster_from_team(team: list[dict]) -> list[tuple[str, str, str, bool, float]]:
+    """Flatten the team spec into (wolf_id, role, tier, thinking, budget_usd) rows to spawn."""
+    rows: list[tuple[str, str, str, bool, float]] = []
+    for entry in team:
+        role = str(entry.get("role"))
+        if role not in _ROLE_SPEC:
+            continue
+        count = max(1, int(entry.get("count") or 1))
+        tier = str(entry.get("tier") or _ROLE_SPEC[role][0])
+        thinking = bool(entry.get("thinking", _ROLE_SPEC[role][1]))
+        budget = float(entry.get("budget_usd") or _ROLE_SPEC[role][2])
+        for wid in _wolf_ids(role, count):
+            rows.append((wid, role, tier, thinking, budget))
+    return rows
+
+# Search APIs (Tavily/Exa/Serp/…) take natural language, not Google dorks — a query like
+# "site:spacex.com OR site:nsf.org past week" returns nothing because the operators are read as
+# literal text. Degrade any dork to plain keywords so the fan-out actually finds sources; recency is
+# the engines' job, not a phrase in the query.
+_DORK_RE = re.compile(
+    r"""(?ix)
+      \b(?:site|filetype|intitle|inurl|intext)\s*:\s*\S+   # site:foo.com, filetype:pdf, …
+    | \b(?:OR|AND)\b                                        # boolean operators
+    | \b(?:past|last)\s+(?:\d+\s+)?(?:day|week|month|year)s?\b   # recency phrases
+    | ["']                                                  # stray quotes
+    """,
+)
+
+
+def _plain_query(query: str) -> str:
+    """Strip search operators and recency phrases down to plain keywords. Falls back to the original
+    if stripping empties it (better a dork than nothing)."""
+    cleaned = _DORK_RE.sub(" ", query)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -|")
+    return cleaned or query.strip()
+
+
+# Filler dropped when broadening a dry scout query — articles/connectors + doc-shaped noise words
+# that narrow a search without adding topic signal ("release notes", "documentation", "github"...).
+_BROADEN_STOP = frozenset(
+    {
+        "the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "with", "its", "their",
+        "is", "are", "release", "notes", "documentation", "docs", "overview", "guide",
+        "github", "official", "latest", "key", "facts",
+    }
+)
 
 # What each dispatch asks its wolf to do. The role's prompt file is the system message; this is
 # the task-specific instruction appended to the user message.
 _INTENT_INSTRUCTIONS: dict[str, str] = {
     "plan": (
-        "Break this into a parallel research plan. Respond with ONLY JSON: a one-line `summary`, "
-        "a `queries` array with one focused web-search query per scout (three), an `assumptions` "
-        "array, and numeric `est_cost` (USD) and `est_time` (seconds)."
+        "Break this into a research plan and size the pack to the task. Respond with ONLY JSON: a "
+        "one-line `summary`; a `team` array of {role, count} — pick 1-5 `scout`s (more for a broad "
+        "topic, fewer for a narrow one); a `queries` array with ONE plain-keyword search query per "
+        "scout (match the scout count); an `assumptions` array; and numeric `est_cost` (USD) and "
+        "`est_time` (seconds). Queries: plain keywords only — NO operators (site:, OR/AND, quotes, "
+        "'past week'); the engine handles recency. Keep each query BROAD enough to return results — "
+        "2-5 common head keywords (the topic plus ONE facet), not a hyper-specific phrase."
     ),
     "search": (
         "Using ONLY the search results provided, summarize the key findings for your angle. "
@@ -89,8 +194,11 @@ _INTENT_INSTRUCTIONS: dict[str, str] = {
         "(array of focused follow-up search queries). Empty array if nothing is missing."
     ),
     "draft": (
-        "Write the final briefing in clear prose, citing the sources inline. Build on the merged "
-        "claims and honor the resolved decision if one is given."
+        "Write the final briefing as ONLY JSON: a `title` and a `blocks` array. Each block is "
+        "{text, source_ids} — `text` is one paragraph of clear prose, `source_ids` are the NUMBERS "
+        "of the sources (from the numbered Sources list) that back that paragraph. Cite real sources "
+        "only; if a paragraph isn't supported by a listed source, leave its source_ids empty. Build "
+        "on the merged claims and honor the resolved decision if one is given."
     ),
     "standoff_challenge": (
         "You are challenging a weak claim. In one or two sentences, state plainly why it doesn't "
@@ -105,6 +213,18 @@ _INTENT_INSTRUCTIONS: dict[str, str] = {
         "qualify the claim, and say why. Plain English."
     ),
 }
+
+
+# When research comes back empty the pack must NOT fabricate a brief — it says so plainly. Two honest
+# cases: the providers errored / were rate-limited, or they genuinely found nothing.
+_NO_SOURCES_NOTE = (
+    "The pack couldn't find sources for this one. The topic may be too sparse or the wording too "
+    "narrow — try rephrasing it, or drop in your own material, and send the pack again."
+)
+_SEARCH_UNAVAILABLE_NOTE = (
+    "Search came back empty — the providers may be rate-limited or down right now. Give it a few "
+    "minutes and try again, or add your own material for the pack to work from."
+)
 
 
 class StopHunt(Exception):
@@ -129,6 +249,7 @@ class Supervisor:
         source: str = "typed",
         raw_input: str = "",
         strategy: str | None = None,
+        seed_team: list[dict] | None = None,
     ) -> None:
         self._hunt_id = hunt_id
         self._emitter = emitter
@@ -139,9 +260,24 @@ class Supervisor:
         self._raw_input = raw_input
         self._strategy = get_strategy(strategy)
         self._wolves: dict[str, Wolf] = {}
+        self._team: list[dict] = []  # v2: the per-task formation Beta proposes / the user edits
+        self._seed_team = seed_team or []  # v5.1: a saved Instinct's formation overrides Beta's
+        self._wolf_budget: dict[str, float] = {}  # v2: per-wolf spend cap
+        self._wolf_spend: dict[str, float] = {}  # v2: per-wolf cumulative spend
+        self._relieved: set[str] = set()  # v2: wolves stood down at their own cap
+        self._doctors: list[str] = []  # v2: spawned Doctors (clone to heal several at once)
+        self._faulted: set[str] = set()  # v2: wolves the Doctor has been sent to heal
+        self._memory_note: str = ""  # v2: what the Elder recalled to seed the plan
+        self._search_attempts = 0  # v2: web searches run (to tell "no results" from "search down")
+        self._search_ok = 0  # v2: web searches that succeeded
+        self._no_sources = False  # v2: the hunt found no traceable ground — never fabricate
+        self._blocks: list[dict] = []  # v3: Howler's tagged blocks [{text, source_ids}] for trace
+        self._kb_picks: list[dict] = []  # v4.2: your-library docs injected as sources this hunt
+        self._kb_absorbed = False  # v4.2: absorb the KB once, not per merge() (deep_dive/critique)
         self._boundary = Boundary(boundary_usd=0.0)
         self._stray = StrayDetector()
         self._warned = False
+        self._dispatch_lock = asyncio.Lock()  # serialises check+reserve; think() runs outside
         self._plan: dict = {}
         self._queries: list[str] = []
         self._sources: list[dict] = []
@@ -167,6 +303,7 @@ class Supervisor:
             await self._approve(approve)
 
             await self._spawn_roster()
+            await self._open_pack()
             await self._strategy.execute(self)
         except StopHunt:
             with contextlib.suppress(Exception):
@@ -177,30 +314,86 @@ class Supervisor:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a hunt must fail as an event, not a crash
+            logging.getLogger("pack").exception("hunt %s failed", self._hunt_id)  # keep the trace
             with contextlib.suppress(Exception):
                 await self._emit(
                     "hunt_failed",
                     "engine",
-                    {"reason_plain_english": f"The hunt hit an error: {exc}"},
+                    {
+                        "reason_plain_english": f"The hunt hit an error: {exc}",
+                        "exc": type(exc).__name__,
+                    },
                 )
                 await self._repo.set_hunt_state(self._hunt_id, "failed")
+
+    async def resume_run(self) -> None:
+        """Continue a hunt that survived an engine restart in `halted_boundary` (B11). Events are
+        the source of truth: rebuild the plan, team, and cumulative spend from the log, stay paused,
+        and wait for the Packmaster's `/resume` (a raised Boundary) before re-running the strategy
+        from the saved plan. Re-scouting reuses the search cache, so resuming is cheap; prior
+        spend carries over so the Boundary is honored across the restart."""
+        try:
+            await self._rehydrate_from_events()
+            await self._repo.set_hunt_state(self._hunt_id, "halted_boundary")  # stay paused
+            cmd = await self._await_command("resume")  # blocks until the user raises the Boundary
+            raised = float(cmd.get("boundary_usd", self._boundary.boundary_usd))
+            spent = self._boundary.cumulative_usd
+            self._boundary = Boundary(boundary_usd=raised)
+            self._boundary.cumulative_usd = spent
+            await self._repo.set_boundary(self._hunt_id, raised)
+            await self._repo.set_hunt_state(self._hunt_id, "hunting")
+            await self._spawn_roster()
+            await self._open_pack()
+            await self._strategy.execute(self)
+        except StopHunt:
+            with contextlib.suppress(Exception):
+                await self._emit("hunt_stopped", "user", {"by": "user"})
+                await self._repo.set_hunt_state(self._hunt_id, "stopped_by_user")
+        except BoundaryHalt:
+            await self._repo.set_hunt_state(self._hunt_id, "halted_boundary")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - resume must fail as an event, not a crash
+            logging.getLogger("pack").exception("resume of hunt %s failed", self._hunt_id)
+            with contextlib.suppress(Exception):
+                await self._emit(
+                    "hunt_failed", "engine", {"reason_plain_english": f"Resume failed: {exc}"}
+                )
+                await self._repo.set_hunt_state(self._hunt_id, "failed")
+
+    async def _rehydrate_from_events(self) -> None:
+        """Restore plan, team, queries, autonomy mode, and the Boundary's cumulative spend from the
+        hunt's event log so a resumed Supervisor picks up where the prior process left off."""
+        events = await self._repo.replay_events(self._hunt_id, 0)
+        plan_ev = next((e for e in reversed(events) if e.type == "plan_proposed"), None)
+        appr_ev = next((e for e in reversed(events) if e.type == "plan_approved"), None)
+        spent_ev = next((e for e in reversed(events) if e.type == "tokens_spent"), None)
+        if plan_ev is not None:
+            self._plan = dict(plan_ev.payload)
+            self._team = _build_team(plan_ev.payload)
+            self._queries = [str(q).strip() for q in (plan_ev.payload.get("queries") or []) if q]
+        if appr_ev is not None:
+            self._mode = str(appr_ev.payload.get("mode") or "on_signal")
+        base = float((appr_ev.payload.get("boundary_usd") if appr_ev else None) or 0.5)
+        self._boundary = Boundary(boundary_usd=base)
+        if spent_ev is not None:
+            self._boundary.cumulative_usd = float(spent_ev.payload.get("cumulative_usd") or 0)
 
     # --- planning + approval -----------------------------------------------------------
 
     async def _propose_plan(self) -> None:
-        """Beta turns the real task into a plan (structured output). Pre-budget, so this call
-        is NOT boundary-gated and NOT counted against the hunt's cumulative spend."""
+        """Beta turns the real task into a plan (structured output). Pre-budget, so this call is NOT
+        boundary-gated. The Elder first recalls past lessons and whispers them to Beta."""
+        self._memory_note = await recall(self._repo, self.task)
         beta = self._make_wolf("beta", "beta", "plus", True)
+        context = f"Coordination strategy: {self._strategy.label} ({self._strategy.pattern})."
+        if self._memory_note:
+            context += f"\n\n{self._memory_note}"
         parsed: dict = {}
         with contextlib.suppress(Exception):
             res = await beta.think(
                 "plan",
-                messages=self._messages(
-                    beta,
-                    "plan",
-                    context=f"Coordination strategy: {self._strategy.label} "
-                    f"({self._strategy.pattern}).",
-                ),
+                messages=self._messages(beta, "plan", context=context),
                 response_schema=PLAN_SCHEMA,
             )
             parsed = res.parsed or {}
@@ -209,39 +402,50 @@ class Supervisor:
         await self._emit("plan_proposed", "beta", self._plan)
         await self._repo.set_hunt_state(self._hunt_id, "plan_ready")
 
+    def _scout_count(self) -> int:
+        """How many scouts the team carries (pre-spawn — reads the spec, not live wolves)."""
+        n = next((int(e.get("count") or 0) for e in self._team if e.get("role") == "scout"), 0)
+        return n or _DEFAULT_SCOUTS
+
     def _normalize_plan(self, parsed: dict) -> dict:
-        """Coerce the model's plan into a schema-valid plan_proposed payload (and carry the
-        per-scout queries + strategy as additive fields the canvas can read)."""
+        """Coerce the model's plan into a schema-valid plan_proposed payload: build the per-task
+        TEAM, then derive the scout angles/steps/worker-roster from it (additive canvas fields)."""
         task = self._raw_input or "the topic"
-        queries = [str(q).strip() for q in (parsed.get("queries") or []) if str(q).strip()]
-        if not queries:
-            queries = [f"{task} — overview", f"{task} — key data", f"{task} — outlook"]
-        queries = queries[: len(SCOUT_IDS)]
-        while len(queries) < len(SCOUT_IDS):
+        # v5.1: a saved Instinct's formation seeds the team (overrides Beta's sizing); else Beta's.
+        self._team = _build_team({"team": self._seed_team} if self._seed_team else parsed)
+        scout_ids = _wolf_ids("scout", self._scout_count())
+        n = len(scout_ids)
+        queries = [str(q).strip() for q in (parsed.get("queries") or []) if str(q).strip()][:n]
+        while len(queries) < n:
             queries.append(f"{task} — angle {len(queries) + 1}")
         assumptions = [str(a).strip() for a in (parsed.get("assumptions") or []) if str(a).strip()]
         return {
             "steps": [
                 {
                     "step_id": "s1",
-                    "summary": f"Range on {len(SCOUT_IDS)} angles of {task}",
-                    "wolves": list(SCOUT_IDS),
+                    "summary": f"Range on {n} angles of {task}",
+                    "wolves": list(scout_ids),
                 },
                 {
                     "step_id": "s2",
                     "summary": "Cross-reference the findings and extract claims",
                     "wolves": ["tracker"],
                 },
-                {"step_id": "s3", "summary": "Draft the briefing with citations", "wolves": ["howler"]},
+                {
+                    "step_id": "s3",
+                    "summary": "Draft the briefing with citations",
+                    "wolves": ["howler"],
+                },
             ],
-            "wolves": [*SCOUT_IDS, "tracker", "sentinel", "howler"],
+            "wolves": [*scout_ids, "tracker", "sentinel", "howler", "elder"],
             "pattern": self._strategy.pattern,
             "assumptions": assumptions or [f"scope: {task}", "recent sources", "briefing format"],
             "est_cost": float(parsed.get("est_cost") or 0.6),
             "est_time": int(parsed.get("est_time") or 210),
-            # additive (schema allows extra payload fields): the canvas + Door read these.
+            # additive (schema allows extra fields): the canvas + Door + Edit Panel read these.
             "queries": queries,
             "strategy": self._strategy.name,
+            "team": self._team,
         }
 
     async def _approve(self, cmd: dict) -> None:
@@ -268,11 +472,20 @@ class Supervisor:
         if not isinstance(edits, dict) or not edits:
             return
         diff: dict = {}
+        # The user reshaped the formation in the Edit Panel — rebuild the canonical team from it.
+        raw_team = edits.get("team")
+        if isinstance(raw_team, list) and raw_team:
+            self._team = _build_team({"team": raw_team})
+            self._plan["team"] = self._team
+            scouts = _wolf_ids("scout", self._scout_count())
+            self._plan["wolves"] = [*scouts, "tracker", "sentinel", "howler", "elder"]
+            diff["team"] = self._team
         raw_queries = edits.get("queries")
         if isinstance(raw_queries, list):
-            qs = [str(q).strip() for q in raw_queries if str(q).strip()][: len(SCOUT_IDS)]
+            n = self._scout_count()
+            qs = [str(q).strip() for q in raw_queries if str(q).strip()][:n]
             if qs:
-                while len(qs) < len(SCOUT_IDS):
+                while len(qs) < n:
                     qs.append(f"{self.task} — angle {len(qs) + 1}")
                 self._plan["queries"] = qs
                 self._queries = list(qs)
@@ -321,8 +534,10 @@ class Supervisor:
             self._commands.put_nowait(c)
 
     async def _spawn_roster(self) -> None:
-        for wolf_id, role, tier, thinking in _ROSTER:
+        roster = _roster_from_team(self._team or _build_team({}))
+        for wolf_id, role, tier, thinking, budget in roster:
             self._wolves[wolf_id] = self._make_wolf(wolf_id, role, tier, thinking)
+            self._wolf_budget[wolf_id] = budget
             await self._emit(
                 "wolf_spawned",
                 "engine",
@@ -332,8 +547,136 @@ class Supervisor:
                     "model_tier": tier,
                     "thinking": thinking,
                     "prompt_version": load_prompt(role).version,
+                    "budget_usd": budget,
+                    "parent_wolf_id": None,
                 },
             )
+
+    async def _spawn_wolf(
+        self,
+        role: str,
+        *,
+        parent: str | None = None,
+        tier: str | None = None,
+        thinking: bool | None = None,
+        budget: float | None = None,
+    ) -> str:
+        """Spawn ONE wolf mid-hunt (a clone or a fresh role) and emit wolf_spawned. Returns its id.
+        Ids follow the roster convention: the bare role, then role-2, role-3 … as copies appear."""
+        d_tier, d_think, d_budget = _ROLE_SPEC.get(role, ("flash", False, 0.05))
+        tier = tier or d_tier
+        thinking = d_think if thinking is None else thinking
+        budget = d_budget if budget is None else budget
+        kin = [w for w in self._wolves if w == role or w.startswith(f"{role}-")]
+        wid = role if not kin else f"{role}-{len(kin) + 1}"
+        self._wolves[wid] = self._make_wolf(wid, role, tier, thinking)
+        self._wolf_budget[wid] = budget
+        await self._emit(
+            "wolf_spawned",
+            "engine",
+            {
+                "wolf_id": wid,
+                "role": role,
+                "model_tier": tier,
+                "thinking": thinking,
+                "prompt_version": load_prompt(role).version,
+                "budget_usd": budget,
+                "parent_wolf_id": parent,
+            },
+        )
+        return wid
+
+    async def clone(self, wolf_id: str) -> str:
+        """Mid-hunt: clone an existing wolf (same role/tier) to add capacity. Returns the new id."""
+        src = self._wolves.get(wolf_id)
+        if src is None:
+            return ""
+        return await self._spawn_wolf(
+            src.role, parent=wolf_id, tier=src.tier, thinking=src.thinking,
+            budget=self._wolf_budget.get(wolf_id),
+        )
+
+    async def spawn(self, role: str) -> str:
+        """Mid-hunt: add a fresh wolf of a role (Alpha widening the pack). Returns the new id."""
+        return await self._spawn_wolf(role)
+
+    async def _ensure_doctor(self) -> str:
+        """A Doctor roams to heal a fault; it clones itself to tend several at once (capped). Returns
+        the Doctor handling the latest fault."""
+        need = max(1, min(len(self._faulted), 3))
+        while len(self._doctors) < need:
+            parent = self._doctors[0] if self._doctors else None
+            self._doctors.append(await self._spawn_wolf("doctor", parent=parent))
+        return self._doctors[-1]
+
+    async def _heal_with_doctor(self, target_wolf_id: str, pattern: str) -> None:
+        """The Doctor is dispatched to a faulted wolf and heals it (reroute). Layered on top of the
+        Stray path — the Stray still fires; the Doctor is the visible healer."""
+        self._faulted.add(target_wolf_id)
+        doctor_id = await self._ensure_doctor()
+        await self._emit(
+            "doctor_dispatched",
+            doctor_id,
+            {"doctor_id": doctor_id, "target_wolf_id": target_wolf_id, "reason": pattern},
+        )
+        note = {
+            "repeat_fail": f"{doctor_id} patched {target_wolf_id} after it kept hitting dead ends.",
+            "loop": f"{doctor_id} reset {target_wolf_id}'s angle — it was circling.",
+            "timeout": f"{doctor_id} pulled {target_wolf_id} back after it stalled.",
+        }.get(pattern, f"{doctor_id} healed {target_wolf_id} and the pack moved on.")
+        await self._emit(
+            "doctor_healed",
+            doctor_id,
+            {
+                "doctor_id": doctor_id,
+                "target_wolf_id": target_wolf_id,
+                "action": "reroute",
+                "note_plain_english": note,
+            },
+        )
+
+    async def _open_pack(self) -> None:
+        """Wake the pack's leadership on the canvas at kickoff. Alpha takes the lead and stays active
+        until finish; Beta hands the approved plan to the pack (its planning is already done). Both
+        emit real lifecycle events so their nodes light up and the edges leaving them flow — without
+        this, Alpha/Beta sit dormant the whole hunt and their edges never animate."""
+        await self._emit(
+            "step_started",
+            "alpha",
+            {"step_id": "s0-lead", "wolf_id": "alpha", "summary": "Leading the hunt"},
+        )
+        await self._emit(
+            "step_started",
+            "beta",
+            {"step_id": "s0-brief", "wolf_id": "beta", "summary": "Briefed the pack on the plan"},
+        )
+        await self._emit(
+            "step_completed",
+            "beta",
+            {
+                "step_id": "s0-brief",
+                "wolf_id": "beta",
+                "output_ref": f"art_{self._hunt_id}_plan",
+                "confidence": 0.9,
+            },
+        )
+        # The Elder consulted the pack's memory before the plan — light its node with what it recalled.
+        recalled = "Recalled past lessons." if self._memory_note else "No past hunts yet."
+        await self._emit(
+            "step_started",
+            "elder",
+            {"step_id": "s0-elder", "wolf_id": "elder", "summary": recalled},
+        )
+        await self._emit(
+            "step_completed",
+            "elder",
+            {
+                "step_id": "s0-elder",
+                "wolf_id": "elder",
+                "output_ref": f"art_{self._hunt_id}_memory",
+                "confidence": 0.9,
+            },
+        )
 
     # --- Engine surface (the primitives strategies orchestrate) ------------------------
 
@@ -346,7 +689,8 @@ class Supervisor:
         return self._plan
 
     def scout_ids(self) -> list[str]:
-        return [w for w in SCOUT_IDS if w in self._wolves]
+        # Live scouts in spawn order — N is whatever Alpha built / the user edited, not a fixed 3.
+        return [wid for wid, w in self._wolves.items() if w.role == "scout"]
 
     def queries(self) -> list[str]:
         return list(self._queries)
@@ -363,6 +707,8 @@ class Supervisor:
         if wolf is None:
             return Finding(wolf_id=wolf_id, summary="", sources=[], confidence=0.0)
 
+        # Plain keywords reach the APIs — covers Beta's plan and the user's edited angles.
+        query = _plain_query(query)
         await self._emit(
             "step_started", wolf_id, {"step_id": step_id, "wolf_id": wolf_id, "summary": f"Searching: {query}"}
         )
@@ -430,13 +776,34 @@ class Supervisor:
         )
         await self.progress("tracker", "merging", f"Cross-referencing {len(findings)} findings")
 
-        res = await self._dispatch(
-            tracker,
-            "merge",
-            context=self._findings_context(findings),
-            phase="merging",
-            response_schema=MERGE_SCHEMA,
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    tracker,
+                    "merge",
+                    context=self._findings_context(findings),
+                    phase="merging",
+                    response_schema=MERGE_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("tracker", "timeout", None)
+            out_ref = new_artifact_id()
+            sources = [s for f in findings for s in f.sources]
+            sources.extend(await self._absorb_knowledge())
+            await self._emit(
+                "step_completed",
+                "tracker",
+                {"step_id": step_id, "wolf_id": "tracker", "output_ref": out_ref, "confidence": 0.0},
+            )
+            return Merged(
+                summary="(tracker stalled — using scout summaries)",
+                claims=[],
+                conflict=None,
+                output_ref=out_ref,
+                sources=sources,
+            )
         parsed = res.parsed or {}
         summary = str(parsed.get("summary") or res.text or "Merged the findings.")
         claims = [str(c).strip() for c in (parsed.get("claims") or []) if str(c).strip()]
@@ -451,7 +818,22 @@ class Supervisor:
             {"step_id": step_id, "wolf_id": "tracker", "output_ref": out_ref, "confidence": 0.9},
         )
         sources = [s for f in findings for s in f.sources]
+        sources.extend(await self._absorb_knowledge())  # v4.2: weave in your library docs
         return Merged(summary=summary, claims=claims, conflict=conflict, output_ref=out_ref, sources=sources)
+
+    async def _absorb_knowledge(self) -> list[dict]:
+        """v4.2: pick the most relevant of your library docs and return them as injectable sources
+        (synthetic lib:// url so de-dupe keeps them). Absorbed ONCE per hunt — deep_dive/critique
+        call merge() twice. Best-effort — never sink a hunt."""
+        if self._kb_absorbed:
+            return list(self._kb_picks)
+        self._kb_absorbed = True
+        try:
+            docs = await self._repo.list_documents(with_text=True)
+        except Exception:  # noqa: BLE001 — the knowledge base is best-effort
+            return []
+        self._kb_picks = select_relevant(docs, self.task)
+        return list(self._kb_picks)
 
     async def resolve_conflict(self, conflict: Conflict) -> str:
         """Open a Hold for the human and block until they decide — unless the Packmaster set the
@@ -490,9 +872,16 @@ class Supervisor:
     async def find_gaps(self, merged: Merged) -> list[str]:
         """Tracker names what's still missing — the queries for a second deep-dive round."""
         tracker = self._wolves["tracker"]
-        res = await self._dispatch(
-            tracker, "gaps", context=self._merged_context(merged), phase="thinking", response_schema=GAPS_SCHEMA
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    tracker, "gaps", context=self._merged_context(merged), phase="thinking", response_schema=GAPS_SCHEMA
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("tracker", "timeout", None)
+            return []
         parsed = res.parsed or {}
         return [str(g).strip() for g in (parsed.get("gaps") or []) if str(g).strip()][:2]
 
@@ -505,13 +894,25 @@ class Supervisor:
             {"step_id": "s-critique", "wolf_id": "sentinel", "summary": "Verifying the claims"},
         )
         await self.progress("sentinel", "critiquing", "Checking every claim carries a source")
-        res = await self._dispatch(
-            sentinel,
-            "critique",
-            context=self._merged_context(merged),
-            phase="critiquing",
-            response_schema=CRITIQUE_SCHEMA,
-        )
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    sentinel,
+                    "critique",
+                    context=self._merged_context(merged),
+                    phase="critiquing",
+                    response_schema=CRITIQUE_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("sentinel", "timeout", None)
+            await self._emit(
+                "step_completed",
+                "sentinel",
+                {"step_id": "s-critique", "wolf_id": "sentinel", "output_ref": f"art_{self._hunt_id}_critique", "confidence": 0.0},
+            )
+            return CritiqueResult(ok=True, issues=[])
         parsed = res.parsed or {}
         issues = [i for i in (parsed.get("issues") or []) if isinstance(i, dict)]
         await self._emit(
@@ -536,10 +937,16 @@ class Supervisor:
         chal_text = rationale
         chal_wolf = self._wolves.get(challenger)
         if chal_wolf is not None:
-            res = await self._dispatch(
-                chal_wolf, "standoff_challenge", context=f"The claim under challenge: {rationale}", phase="critiquing"
-            )
-            chal_text = res.text or rationale
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        chal_wolf, "standoff_challenge", context=f"The claim under challenge: {rationale}", phase="critiquing"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                chal_text = res.text or rationale
+            except TimeoutError:
+                pass  # chal_text stays as rationale fallback
         await self._emit(
             "standoff_turn", challenger, {"standoff_id": sid, "turn_no": 1, "argument_summary": chal_text[:140]}
         )
@@ -548,10 +955,16 @@ class Supervisor:
         def_text = "Fair — I'll back it with a second source."
         def_wolf = self._wolves.get(defendant)
         if def_wolf is not None:
-            res = await self._dispatch(
-                def_wolf, "standoff_defend", context=f"The challenge to answer: {chal_text}", phase="thinking"
-            )
-            def_text = res.text or def_text
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        def_wolf, "standoff_defend", context=f"The challenge to answer: {chal_text}", phase="thinking"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                def_text = res.text or def_text
+            except TimeoutError:
+                pass  # def_text stays as fallback
         await self._emit(
             "standoff_turn", defendant, {"standoff_id": sid, "turn_no": 2, "argument_summary": def_text[:140]}
         )
@@ -560,10 +973,16 @@ class Supervisor:
         rationale_out = "Keep the claim only once a second source backs it."
         alpha = self._wolves.get("alpha")
         if alpha is not None:
-            res = await self._dispatch(
-                alpha, "standoff_judge", context=f"Challenge: {chal_text}\nDefense: {def_text}", phase="thinking"
-            )
-            rationale_out = res.text or rationale_out
+            try:
+                res = await asyncio.wait_for(
+                    self._dispatch(
+                        alpha, "standoff_judge", context=f"Challenge: {chal_text}\nDefense: {def_text}", phase="thinking"
+                    ),
+                    timeout=self._step_timeout,
+                )
+                rationale_out = res.text or rationale_out
+            except TimeoutError:
+                pass  # rationale_out stays as fallback
         await self._emit(
             "standoff_resolved",
             "alpha",
@@ -596,8 +1015,31 @@ class Supervisor:
                 return
 
     async def draft(self, merged: Merged, decision: str | None = None, step_id: str = "s3") -> str:
-        """Howler writes the final briefing from the merged claims and the chosen decision."""
+        """Howler writes the final briefing from the merged claims and the chosen decision. With NO
+        sources there is no traceable ground — we don't ask Howler to write (it would only refuse);
+        we return an honest notice instead."""
         await self._absorb_inputs()  # A7: last chance to fold in mid-hunt input before drafting
+        if not self._dedupe_sources(merged.sources):
+            self._no_sources = True
+            unavailable = self._search_attempts > 0 and self._search_ok == 0
+            await self._emit(
+                "step_started",
+                "howler",
+                {"step_id": step_id, "wolf_id": "howler", "summary": "No sources to write up"},
+            )
+            await self._emit(
+                "step_completed",
+                "howler",
+                {
+                    "step_id": step_id,
+                    "wolf_id": "howler",
+                    "output_ref": f"art_{self._hunt_id}_draft",
+                    "confidence": 0.0,
+                },
+            )
+            note = _SEARCH_UNAVAILABLE_NOTE if unavailable else _NO_SOURCES_NOTE
+            self._blocks = [{"text": note, "source_ids": []}]
+            return note
         if self._mode == "on_command":
             await self._confirm_draft()
         howler = self._wolves["howler"]
@@ -607,35 +1049,104 @@ class Supervisor:
             {"step_id": step_id, "wolf_id": "howler", "summary": "Drafting the briefing with citations"},
         )
         await self.progress("howler", "writing", "Drafting the briefing")
-        res = await self._dispatch(howler, "draft", context=self._draft_context(merged, decision), phase="writing")
+        try:
+            res = await asyncio.wait_for(
+                self._dispatch(
+                    howler,
+                    "draft",
+                    context=self._draft_context(merged, decision),
+                    phase="writing",
+                    response_schema=DRAFT_SCHEMA,
+                ),
+                timeout=self._step_timeout,
+            )
+        except TimeoutError:
+            await self._stray_event("howler", "timeout", None)
+            self._blocks = [{"text": merged.summary, "source_ids": []}]
+            await self._emit(
+                "step_completed",
+                "howler",
+                {"step_id": step_id, "wolf_id": "howler", "output_ref": f"art_{self._hunt_id}_draft", "confidence": 0.0},
+            )
+            return merged.summary
+        self._blocks = self._blocks_from(res, self._dedupe_sources(merged.sources))
         await self._emit(
             "step_completed",
             "howler",
             {"step_id": step_id, "wolf_id": "howler", "output_ref": f"art_{self._hunt_id}_draft", "confidence": 0.86},
         )
-        return res.text or merged.summary
+        return "\n\n".join(b["text"] for b in self._blocks) or res.text or merged.summary
+
+    def _blocks_from(self, res: CompletionResult, sources: list[dict]) -> list[dict]:
+        """Normalize Howler's tagged output into [{text, source_ids}] blocks. Falls back to wrapping
+        free text as one block (all sources) if the model didn't return structured blocks."""
+        parsed = res.parsed or {}
+        out: list[dict] = []
+        title = str(parsed.get("title") or "").strip()
+        if title:
+            out.append({"text": f"# {title}", "source_ids": []})
+        for b in parsed.get("blocks") or []:
+            if not isinstance(b, dict):
+                continue
+            text = str(b.get("text") or "").strip()
+            if not text:
+                continue
+            ids = [
+                int(i)
+                for i in (b.get("source_ids") or [])
+                if isinstance(i, int | float) and 1 <= int(i) <= len(sources)
+            ]
+            out.append({"text": text, "source_ids": sorted(set(ids))})
+        if not any(b["text"] and not b["text"].startswith("# ") for b in out):
+            # No real body blocks — wrap whatever free text came back, crediting all sources.
+            out.append(
+                {"text": (res.text or "").strip(), "source_ids": list(range(1, len(sources) + 1))}
+            )
+        return out
 
     async def finish(self, draft_text: str, merged: Merged) -> None:
         """Save the final artifact + a provenance span map, then close the hunt."""
         artifact_id = new_artifact_id()
-        sources = self._dedupe_sources(merged.sources)
+        # Drop the full fetched/library `text` before persisting — the UI shows snippet, not text,
+        # and keeping it bloats the artifact (web fetch ≤1500, KB ≤1200 chars per source).
+        deduped = self._dedupe_sources(merged.sources)
+        sources = [{k: v for k, v in s.items() if k != "text"} for s in deduped]
+        blocks = self._blocks or [{"text": draft_text, "source_ids": []}]
 
-        # B3 — a real (coarse) provenance map: each claim → the sources that back it.
+        # v3 — a BLOCK-LEVEL provenance map: each block → its exact sources (the click-any-line
+        # → source gate). Replaces the coarse claim map.
         spanmap_ref: str | None = None
-        if merged.claims and sources:
+        if any(b.get("source_ids") for b in blocks):
             spanmap_ref = new_artifact_id()
             spans = [
-                {"claim": c, "source_refs": [s.get("url", "") for s in sources[:3] if s.get("url")]}
-                for c in merged.claims
+                {
+                    "block": i,
+                    "source_ids": b.get("source_ids", []),
+                    "source_refs": [
+                        sources[j - 1].get("url", "")
+                        for j in b.get("source_ids", [])
+                        if 1 <= j <= len(sources)
+                    ],
+                }
+                for i, b in enumerate(blocks)
             ]
-            await self._repo.save_artifact(spanmap_ref, self._hunt_id, "spanmap", "howler", {"spans": spans})
+            await self._repo.save_artifact(
+                spanmap_ref, self._hunt_id, "provenance_map", "howler", {"spans": spans}
+            )
 
         await self._repo.save_artifact(
             artifact_id,
             self._hunt_id,
             "final",
             "howler",
-            {"text": draft_text, "claims": merged.claims, "sources": sources, "span_map_ref": spanmap_ref},
+            {
+                "text": draft_text,
+                "blocks": blocks,  # v3: tagged blocks for click-any-line → source
+                "claims": merged.claims,
+                "sources": sources,
+                "span_map_ref": spanmap_ref,
+                "no_sources": self._no_sources or not sources,  # honest empty state
+            },
         )
         await self._emit(
             "artifact_created",
@@ -647,12 +1158,59 @@ class Supervisor:
                 "provenance_span_map_ref": spanmap_ref,
             },
         )
+
+        # v3 — the Forge: render the brief into real files (the "making the file" phase). Skipped when
+        # there's no real brief (no sources). Best-effort: a render failure never blocks completion.
+        if blocks and not (self._no_sources or not sources):
+            await self.progress("howler", "forge", "Making your files")
+            await self._emit("forge_started", "howler", {"formats": list(MIME)})
+            forged_ids: list[str] = []
+            for fmt, data in forge(blocks, sources).items():  # v-fix: exports carry their Sources
+                fid = new_artifact_id()
+                await self._repo.save_artifact(
+                    fid,
+                    self._hunt_id,
+                    fmt,
+                    "howler",
+                    {
+                        "mime": MIME.get(fmt, "application/octet-stream"),
+                        "b64": base64.b64encode(data).decode(),
+                    },
+                )
+                await self._emit(
+                    "artifact_created",
+                    "howler",
+                    {"artifact_id": fid, "kind": fmt, "produced_by": "howler"},
+                )
+                forged_ids.append(fid)
+            await self._emit(
+                "forge_completed", "howler", {"formats": list(MIME), "artifact_ids": forged_ids}
+            )
+
         totals = {
             "cost_usd": round(self._boundary.cumulative_usd, 6),
             "time_s": int(self._plan.get("est_time", 210)),
             "sources": len(sources),
             "wolves": len(self._wolves),
         }
+        # Alpha closes out — its node settles to done (green) instead of glowing forever.
+        await self._emit(
+            "step_completed",
+            "alpha",
+            {
+                "step_id": "s0-lead",
+                "wolf_id": "alpha",
+                "output_ref": artifact_id,
+                "confidence": 0.95,
+            },
+        )
+        # The Elder records one durable takeaway for next time (best-effort, local-only).
+        strategy = self._plan.get("strategy", "orchestrate")
+        scout_n = sum(1 for w in self._wolves.values() if w.role == "scout")
+        got = 0 if self._no_sources else len(sources)
+        outcome = f"{got} sources" if got else "no sourced ground"
+        takeaway = f"Topic '{self.task}': {strategy} strategy, {scout_n} scouts, {outcome}."
+        await remember(self._repo, self._hunt_id, takeaway)
         await self._emit("hunt_completed", "engine", {"final_artifact_id": artifact_id, "totals": totals})
         await self._repo.set_hunt_state(self._hunt_id, "returned")
 
@@ -667,68 +1225,157 @@ class Supervisor:
         phase: str | None = None,
         response_schema: dict | None = None,
     ) -> CompletionResult:
-        """The one path a model call takes. Gate BEFORE the call, account AFTER."""
-        est = pricing.estimate(wolf.tier)
-        verdict = self._boundary.check(est)
+        """The one path a model call takes. Per-wolf cap + hunt Boundary gate BEFORE, account AFTER.
 
-        if verdict is Verdict.HALT:
-            # Halt is a PAUSE, not a death: checkpoint, surface the choice, and wait for the human
-            # to raise the Boundary (resume) or stop. On resume, re-check the gate and proceed.
-            await self._halt()
-            await self._await_resume()
-            return await self._dispatch(
-                wolf, intent, context, phase=phase, response_schema=response_schema
+        Check-and-reserve are atomic under _dispatch_lock so parallel scouts (asyncio.gather in
+        strategies) cannot all clear the gate against the same stale cumulative_usd. wolf.think()
+        runs OUTSIDE the lock so scouts genuinely execute in parallel. Reconcile to actual spend
+        under the lock after think() returns. Halt/resume loop replaces the old recursion.
+        """
+        # A wolf already relieved (it blew its own cap at the floor tier) makes no further calls.
+        if wolf.wolf_id in self._relieved:
+            return self._relieved_result(wolf)
+
+        while True:
+            # Declare what to do after the lock is released — avoids any await inside the lock.
+            _cap_downgrade: tuple[str, bool] | None = None
+            _do_relieve = False
+            _do_halt = False
+            _boundary_downgrade: tuple[str, bool] | None = None
+            _warn_info: dict | None = None
+            est: float = 0.0
+
+            async with self._dispatch_lock:
+                est = pricing.estimate(wolf.tier)
+
+                # Per-wolf cap: one runaway wolf must not drain the whole hunt. Drop to flash once;
+                # if still over cap, relieve it — pack carries on, hunt never halts for one wolf.
+                cap = self._wolf_budget.get(wolf.wolf_id)
+                if cap is not None and self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+                    if wolf.tier != "flash":
+                        _cap_downgrade = (wolf.tier, wolf.thinking)
+                        wolf.tier, wolf.thinking = "flash", False
+                        est = pricing.estimate("flash")
+                    if self._wolf_spend.get(wolf.wolf_id, 0.0) + est > cap:
+                        self._relieved.add(wolf.wolf_id)
+                        _do_relieve = True
+
+                if not _do_relieve:
+                    verdict = self._boundary.check(est)
+                    if verdict is Verdict.HALT:
+                        _do_halt = True
+                    else:
+                        # Boundary downgrade / warn decisions (capture state before reserving)
+                        if verdict is Verdict.DOWNGRADE and wolf.tier != "flash":
+                            _boundary_downgrade = (wolf.tier, wolf.thinking)
+                            wolf.tier, wolf.thinking = "flash", False
+                        if verdict is Verdict.WARN and not self._warned:
+                            self._warned = True
+                            _warn_info = {
+                                "pct": round(self._boundary.projected_pct(est), 2),
+                                "cumulative_usd": round(self._boundary.cumulative_usd, 6),
+                            }
+                        # RESERVE estimated spend atomically — reconciled to actual after think().
+                        self._boundary.cumulative_usd += est
+                        self._wolf_spend[wolf.wolf_id] = (
+                            self._wolf_spend.get(wolf.wolf_id, 0.0) + est
+                        )
+            # Lock released — all I/O happens below.
+
+            if _cap_downgrade:
+                from_tier, thinking_off = _cap_downgrade
+                await self._emit(
+                    "boundary_downgrade",
+                    "engine",
+                    {"wolf_id": wolf.wolf_id, "from_tier": from_tier,
+                     "to_tier": "flash", "thinking_off": thinking_off},
+                )
+
+            if _do_relieve:
+                await self.progress(wolf.wolf_id, phase or "thinking", "Hit its budget — standing down.")
+                return self._relieved_result(wolf)
+
+            if _do_halt:
+                # Halt is a PAUSE: checkpoint, surface the choice, wait for human to raise the
+                # Boundary (resume) or stop. On resume, loop back and re-check the gate.
+                await self._halt()
+                await self._await_resume()
+                continue
+
+            if _boundary_downgrade:
+                from_tier, thinking_off = _boundary_downgrade
+                await self._emit(
+                    "boundary_downgrade",
+                    "engine",
+                    {"wolf_id": wolf.wolf_id, "from_tier": from_tier,
+                     "to_tier": "flash", "thinking_off": thinking_off},
+                )
+
+            if _warn_info:
+                await self._emit("boundary_warning", "engine", _warn_info)
+
+            on_delta = self._progress_sink(wolf.wolf_id, phase) if (phase and wolf.thinking) else None
+            result = await wolf.think(
+                intent,
+                messages=self._messages(wolf, intent, context),
+                response_schema=response_schema,
+                on_delta=on_delta,
             )
-        if verdict is Verdict.DOWNGRADE and wolf.tier != "flash":
-            from_tier, thinking_off = wolf.tier, wolf.thinking
-            wolf.tier, wolf.thinking = "flash", False
+
+            # RECONCILE: correct reserved estimate to actual spend.
+            async with self._dispatch_lock:
+                delta = result.cost_usd - est
+                self._boundary.cumulative_usd += delta
+                self._wolf_spend[wolf.wolf_id] = self._wolf_spend.get(wolf.wolf_id, 0.0) + delta
+
             await self._emit(
-                "boundary_downgrade",
-                "engine",
-                {"wolf_id": wolf.wolf_id, "from_tier": from_tier, "to_tier": "flash", "thinking_off": thinking_off},
-            )
-        elif verdict is Verdict.WARN and not self._warned:
-            self._warned = True
-            await self._emit(
-                "boundary_warning",
-                "engine",
+                "tokens_spent",
+                wolf.wolf_id,
                 {
-                    "pct": round(self._boundary.projected_pct(est), 2),
+                    "wolf_id": wolf.wolf_id,
+                    "model": result.model,
+                    "in_tokens": result.in_tokens,
+                    "out_tokens": result.out_tokens,
+                    "cost_usd": round(result.cost_usd, 6),
                     "cumulative_usd": round(self._boundary.cumulative_usd, 6),
                 },
             )
+            return result
 
-        on_delta = self._progress_sink(wolf.wolf_id, phase) if (phase and wolf.thinking) else None
-        result = await wolf.think(
-            intent,
-            messages=self._messages(wolf, intent, context),
-            response_schema=response_schema,
-            on_delta=on_delta,
+    def _relieved_result(self, wolf: Wolf) -> CompletionResult:
+        """An empty result for a wolf relieved at its budget cap — no spend, no model call. Callers
+        fall back to their defaults, so a relieved wolf simply contributes nothing further."""
+        return CompletionResult(
+            text="", model="(relieved)", tier=wolf.tier,
+            in_tokens=0, out_tokens=0, cost_usd=0.0, parsed=None,
         )
-        self._boundary.cumulative_usd += result.cost_usd
-        await self._emit(
-            "tokens_spent",
-            wolf.wolf_id,
-            {
-                "wolf_id": wolf.wolf_id,
-                "model": result.model,
-                "in_tokens": result.in_tokens,
-                "out_tokens": result.out_tokens,
-                "cost_usd": round(result.cost_usd, 6),
-                "cumulative_usd": round(self._boundary.cumulative_usd, 6),
-            },
-        )
-        return result
 
-    async def _scout_search(
+    def _broaden(self, query: str) -> str:
+        """A shorter, plainer query for a scout's SECOND attempt when its first came back dry: the
+        task subject's keywords plus the angle's most distinctive ones, capped short. Deterministic
+        (no model call). Keeps each scout on ITS OWN angle so the pack's sources stay diverse."""
+        subject = [w for w in _plain_query(self.task).split() if w.lower() not in _BROADEN_STOP][:4]
+        have = {w.lower() for w in subject}
+        extra = [
+            w
+            for w in _plain_query(query).split()
+            if w.lower() not in have and w.lower() not in _BROADEN_STOP
+        ][:3]
+        return " ".join(subject + extra) or _plain_query(query) or self.task
+
+    async def _one_search(
         self, wolf: Wolf, query: str
     ) -> tuple[list[dict], bool, str | None, str | None]:
-        """Run the real web_search, deep-read the top hit (web_fetch), persist the hits, emit the
-        tool events. Returns (hits, ok, artifact_ref, stray_pattern-or-None)."""
+        """One real web_search: emit tool events, account for it, persist hits. No fetch here."""
         await self._emit(
-            "tool_called", wolf.wolf_id, {"wolf_id": wolf.wolf_id, "tool": "web_search", "args_summary": query}
+            "tool_called",
+            wolf.wolf_id,
+            {"wolf_id": wolf.wolf_id, "tool": "web_search", "args_summary": query},
         )
         res = await WEB_SEARCH.run(wolf_id=wolf.wolf_id, query=query)
+        self._search_attempts += 1
+        if res.ok:
+            self._search_ok += 1
         stray = self._stray.record_tool_result(wolf.wolf_id, res.ok)
         hits = (res.data or {}).get("hits", []) if isinstance(res.data, dict) else []
         ref: str | None = None
@@ -750,6 +1397,25 @@ class Supervisor:
                 "hits": len(hits),  # additive: lets the canvas show a per-wolf source count
             },
         )
+        return hits, res.ok, ref, stray
+
+    async def _scout_search(
+        self, wolf: Wolf, query: str
+    ) -> tuple[list[dict], bool, str | None, str | None]:
+        """Run the real web_search, deep-read the top hit (web_fetch), persist the hits, emit the
+        tool events. Returns (hits, ok, artifact_ref, stray_pattern-or-None).
+
+        If the scout's own angle comes back DRY, broaden ONCE and range again before giving up —
+        this is what keeps every scout productive instead of the pack collapsing onto one."""
+        hits, ok, ref, stray = await self._one_search(wolf, query)
+        if not hits:
+            broad = self._broaden(query)
+            if broad and broad.lower() != _plain_query(query).lower():
+                await self.progress(wolf.wolf_id, "searching", f"Broadening: {broad}")
+                hits, ok2, ref2, stray2 = await self._one_search(wolf, broad)
+                ok = ok or ok2
+                ref = ref2 or ref
+                stray = stray2 or stray
 
         # A4 — deep-read the top hit so findings rest on the full page, not just the snippet.
         if hits and hits[0].get("url"):
@@ -779,7 +1445,7 @@ class Supervisor:
         for h in hits:
             h["by"] = wolf.wolf_id
             h["verified"] = bool(h.get("text"))
-        return hits, res.ok, ref, stray
+        return hits, ok, ref, stray
 
     def _progress_sink(self, wolf_id: str, phase: str) -> OnDelta:
         """Coalesce streamed text into a few sentence-bounded `wolf_progress` beats (never one
@@ -814,7 +1480,8 @@ class Supervisor:
                 await self._repo.set_boundary(self._hunt_id, self._boundary.boundary_usd)
                 await self._repo.set_hunt_state(self._hunt_id, "hunting")
                 return
-            # ignore anything else while paused
+            # Re-queue anything else (e.g. add_input) so it isn't lost while paused.
+            self._commands.put_nowait(cmd)
 
     async def _halt(self) -> None:
         ckpt = new_checkpoint_id()
@@ -832,12 +1499,13 @@ class Supervisor:
         )
 
     async def _stray_event(self, wolf_id: str, pattern: str, evidence_ref: str | None) -> None:
-        """Narrate a Stray and Alpha's recovery (reroute). The hunt stays in 'hunting'."""
+        """Narrate a Stray and the recovery. The Doctor performs the heal; the hunt stays 'hunting'."""
         await self._emit(
             "stray_detected",
             "engine",
             {"wolf_id": wolf_id, "pattern": pattern, "evidence_ref": evidence_ref or f"art_{wolf_id}_stray"},
         )
+        await self._heal_with_doctor(wolf_id, pattern)  # v2: the Doctor roams in to heal the fault
         note = {
             "repeat_fail": f"{wolf_id} kept hitting dead ends — Alpha rerouted it.",
             "loop": f"{wolf_id} was circling the same ground — Alpha reset its angle.",
@@ -878,6 +1546,8 @@ class Supervisor:
             srcs = "; ".join(f"{s.get('title', '')} ({s.get('url', '')})" for s in f.sources[:4])
             blocks.append(f"[{f.wolf_id}] {f.summary}\nSources: {srcs or 'none'}")
         out = "\n\n".join(blocks) or "No findings."
+        if self._memory_note:  # v4.1: the Elder's recall informs the merge too, not just the plan
+            out += f"\n\n{self._memory_note}"
         return out + self._extra_inputs_block()
 
     def _extra_inputs_block(self) -> str:
@@ -896,9 +1566,14 @@ class Supervisor:
             parts.append(f"Resolved decision: {decision}")
         sources = self._dedupe_sources(merged.sources)
         if sources:
-            parts.append(
-                "Sources:\n" + "\n".join(f"- {s.get('title', '')}: {s.get('url', '')}" for s in sources[:8])
+            numbered = "\n".join(
+                f"[{i + 1}] {s.get('title', '') or s.get('url', '')} — {s.get('url', '')}"
+                for i, s in enumerate(sources)
             )
+            parts.append(f"Sources (cite each block by number):\n{numbered}")
+        if self._kb_picks:  # v4.2: give Howler the library text so it can actually cite it
+            lib = "\n".join(f"- {p['title']}: {p['text'][:600]}" for p in self._kb_picks)
+            parts.append(f"From your library:\n{lib}")
         block = self._extra_inputs_block()
         if block:
             parts.append(block.strip())

@@ -37,6 +37,10 @@ class DeepDiveStrategy(Strategy):
             findings.extend(f for f in extra if f)
             merged = await engine.merge(findings, step_id="s2b")
 
+        # Sentinel verifies every claim carries a real source before we draft — a real check that
+        # also wakes the Sentinel node on the canvas (this strategy used to skip it).
+        await engine.critique(merged)
+
         decision = None
         if merged.conflict:
             decision = await engine.resolve_conflict(merged.conflict)

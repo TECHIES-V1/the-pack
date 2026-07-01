@@ -25,8 +25,10 @@ class HuntHandle:
 class HuntRegistry:
     def __init__(self) -> None:
         self._hunts: dict[str, HuntHandle] = {}
+        self._lock = asyncio.Lock()
 
     def register(self, hunt_id: str) -> HuntHandle:
+        """Create a handle and store it. Sync — call before starting the Supervisor task."""
         handle = HuntHandle(hunt_id=hunt_id)
         self._hunts[hunt_id] = handle
         return handle
@@ -34,19 +36,31 @@ class HuntRegistry:
     def get(self, hunt_id: str) -> HuntHandle | None:
         return self._hunts.get(hunt_id)
 
+    def unregister(self, hunt_id: str) -> None:
+        """Remove a handle after its Supervisor has exited."""
+        self._hunts.pop(hunt_id, None)
+
     async def send(self, hunt_id: str, command: dict[str, Any]) -> bool:
-        """Queue a command for a live hunt. False if the hunt isn't running here."""
-        handle = self._hunts.get(hunt_id)
-        if handle is None:
-            return False
-        await handle.commands.put(command)
+        """Queue a command for a LIVE hunt. Returns False if the hunt isn't running here.
+
+        The lock closes the TOCTOU gap between `task.done()` and `commands.put()` — without it a
+        task could complete in that window, the command would enqueue on an orphaned queue and
+        never be consumed. With the lock, register/unregister and send are mutually exclusive.
+        """
+        async with self._lock:
+            handle = self._hunts.get(hunt_id)
+            if handle is None or (handle.task is not None and handle.task.done()):
+                return False
+            await handle.commands.put(command)
         return True
 
     async def shutdown(self) -> None:
         """Cancel every running Supervisor task (lifespan shutdown)."""
-        for handle in self._hunts.values():
+        async with self._lock:
+            handles = list(self._hunts.values())
+            self._hunts.clear()
+        for handle in handles:
             if handle.task is not None and not handle.task.done():
                 handle.task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await handle.task
-        self._hunts.clear()

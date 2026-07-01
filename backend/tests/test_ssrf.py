@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.tools.file_parse import assert_public_url
+from app.tools._ssrf import assert_public_url
 
 
 @pytest.mark.parametrize(

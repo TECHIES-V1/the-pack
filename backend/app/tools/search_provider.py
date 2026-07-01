@@ -80,16 +80,22 @@ class CannedProvider:
         return f"[offline] readable text extracted from {url}."
 
 
-# A fan-out returns within this budget: take what the fast providers gave, cancel the stragglers, so
-# one slow/hung upstream can't make every search wait out its full timeout.
-_SEARCH_BUDGET_S = 7.0
+# Fan-out timing — defaults mirror config, but read from `settings` at call time so a .env override
+# (or a test monkeypatch of these module globals) takes effect. BUDGET is the hard ceiling; SOFT is
+# the early return once we have ground, so a hung upstream can't make every search wait it out —
+# which, under parallel scouts, pileup-throttles most of them to zero hits.
+_SEARCH_BUDGET_S = settings.search_budget_s
+_SEARCH_SOFT_S = settings.search_soft_s
 
 # Cap concurrent calls to the SAME upstream across parallel scouts — light rate-limit politeness.
 _PROVIDER_SEM: dict[str, asyncio.Semaphore] = {}
 
 
 def _sem(name: str) -> asyncio.Semaphore:
-    return _PROVIDER_SEM.setdefault(name, asyncio.Semaphore(2))
+    # Cap concurrent calls to the SAME upstream. Sized so a full pack (3-5 scouts, each searching +
+    # broadening) doesn't serialize on one fast provider — that pileup, not the providers, is what
+    # left most scouts with zero hits while one got them all. Tunable via settings.
+    return _PROVIDER_SEM.setdefault(name, asyncio.Semaphore(settings.search_provider_concurrency))
 
 
 class MultiProvider:
@@ -112,22 +118,32 @@ class MultiProvider:
     async def _fan_out(self, query: str, max_results: int) -> list[SearchHit]:
         per = max(3, max_results // 2)
         tasks = [asyncio.create_task(self._guarded(s, query, per)) for s in self._subs]
-        # Budget the fan-out: keep what finished, cancel stragglers, never wait on the slowest.
-        done, pending = await asyncio.wait(tasks, timeout=_SEARCH_BUDGET_S)
+        best: dict[str, SearchHit] = {}
+
+        def collect(finished: set) -> None:
+            for t in finished:
+                try:
+                    r = t.result()
+                except Exception:  # noqa: BLE001 — an upstream errored; already isolated, skip it
+                    continue
+                for h in r:
+                    if not h.url:
+                        continue
+                    cur = best.get(h.url)
+                    if cur is None or h.score > cur.score:
+                        best[h.url] = h
+
+        # Phase 1 — gather whatever the FAST providers return within the soft window (never longer
+        # than the hard budget, so a patched/tiny budget still bounds the whole fan-out).
+        soft = min(_SEARCH_SOFT_S, _SEARCH_BUDGET_S)
+        done, pending = await asyncio.wait(set(tasks), timeout=soft)
+        collect(done)
+        # Phase 2 — only if we still have nothing, wait out the stragglers to the hard ceiling.
+        if not best and pending:
+            done, pending = await asyncio.wait(pending, timeout=_SEARCH_BUDGET_S - soft)
+            collect(done)
         for t in pending:
             t.cancel()
-        best: dict[str, SearchHit] = {}
-        for t in done:
-            try:
-                r = t.result()
-            except Exception:  # noqa: BLE001 — an upstream errored; already isolated, skip it
-                continue
-            for h in r:
-                if not h.url:
-                    continue
-                cur = best.get(h.url)
-                if cur is None or h.score > cur.score:
-                    best[h.url] = h
         return sorted(best.values(), key=lambda h: h.score, reverse=True)[:max_results]
 
     async def search(self, query: str, *, max_results: int = 8) -> SearchResults:

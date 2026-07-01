@@ -17,6 +17,12 @@ dependencies = [
     "httpx>=0.27",
     "pypdf>=4.2",
     "python-multipart>=0.0.9",
+    "reportlab>=4.2",
+    "python-docx>=1.1",
+    "markdown>=3.6",
+    "openpyxl>=3.1",
+    "python-pptx>=0.6",
+    "imageio-ffmpeg>=0.5",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +39,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008",  # FastAPI's Depends()/File()/Query() in default args is the correct pattern
+]
 
 [tool.black]
 line-length = 100

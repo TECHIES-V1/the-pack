@@ -1,43 +1,50 @@
-/* @import must precede all other statements (CSS rule). */
-@import "@xyflow/react/dist/style.css";
-@import "./styles/tokens.css";
+@import "tailwindcss";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@theme {
+  --color-canvas: #0b0b0d;
+  --color-surface: #15151a;
+  --color-surface-raised: #1e1e26;
+  --color-border: #282832;
+  --color-border-subtle: #1c1c24;
+  --color-accent: #8b5cf6;
+  --color-accent-dim: #6d28d9;
+  --color-warn: #eab308;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-muted: #74748a;
+  --color-text: #f0f0f4;
+  --color-text-dim: #a1a1b5;
 
-html,
-body,
-#root {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
   height: 100%;
   margin: 0;
+  padding: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
   font-family: var(--font-sans);
-  background: var(--bone);
-  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
-.scrollbar-none {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-subtle {
-  scrollbar-width: thin;
-  scrollbar-color: #2a2a2a transparent;
-}
-.scrollbar-subtle::-webkit-scrollbar {
-  width: 4px;
-}
-.scrollbar-subtle::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-.scrollbar-subtle::-webkit-scrollbar-thumb {
-  background-color: #2a2a2a;
-  border-radius: 4px;
-}
-.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
-  background-color: #404040;
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
 }

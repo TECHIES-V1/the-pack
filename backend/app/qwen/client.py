@@ -162,13 +162,13 @@ class QwenClient:
         raise last_exc
 
     def _response_format(self, spec: CallSpec) -> dict | None:
-        if spec.response_schema is None:
+        # THE THINKING FIX. Real DashScope 400s on a response_format while enable_thinking is on;
+        # offline FakeQwen ignores response_format, which hid it. So thinking wolves send NO
+        # response_format and rely on their "ONLY JSON" prompt + the lenient parse in _account.
+        # Non-thinking structured calls use json_object (broadly supported; json_schema is spotty).
+        if spec.response_schema is None or spec.thinking:
             return None
-        # Prefer strict json_schema; DashScope also honors json_object as a fallback.
-        return {
-            "type": "json_schema",
-            "json_schema": {"name": spec.intent or "handoff", "schema": spec.response_schema},
-        }
+        return {"type": "json_object"}
 
     async def _once(
         self,

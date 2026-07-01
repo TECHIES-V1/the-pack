@@ -1,18 +1,30 @@
 # Pack Engine — Postman
 
-Complete REST surface for the Pack engine (17 endpoints).
+Complete REST surface for the Pack engine (52 endpoints).
+
+## Public workspace
+
+**[postman.com/tobiloba-sulaimon-s-team/pack-engine](https://www.postman.com/tobiloba-sulaimon-s-team/pack-engine)**
+
+Fork the collection and environment from there — no download needed.
+
+## Run in Postman
+
+[![Run in Postman](https://run.pstmn.io/button.svg)](https://god.postman.co/run-collection/47914215-a0354501-f14a-4ff5-ad12-9194c7dd42f7)
 
 ## Files
-- `Pack.postman_collection.json` — all endpoints, grouped into folders with example bodies.
+- `Pack.postman_collection.json` — all 52 endpoints, grouped into folders with example bodies.
 - `Pack.postman_environment.json` — `baseUrl` (default `http://localhost:8000`) + `huntId`,
   `holdId`, `instinctId`.
 
 Regenerate after adding routes: `backend/.venv/Scripts/python backend/scripts/gen_postman.py`.
 
-## Import
-1. Postman → Import → both JSON files.
-2. Select the **Pack — Local** environment.
-3. Start the engine: `uvicorn app.main:app --port 8000` (from `backend/`).
+## Import (alternative)
+1. Postman → Import → Link → paste:
+   `https://raw.githubusercontent.com/TECHIES-V1/the-pack/main/docs/postman/Pack.postman_collection.json`
+2. Repeat for the environment file (same path, `Pack.postman_environment.json`).
+3. Select the **Pack — Local** environment.
+4. Start the engine: `uvicorn app.main:app --port 8000` (from `backend/`).
 
 ## The model
 Commands return **202 Accepted** with a tiny ack — the *result* is never in the HTTP response, it

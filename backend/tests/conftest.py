@@ -15,6 +15,14 @@ from app.tools.search_provider import CannedProvider
 
 
 @pytest.fixture(autouse=True)
+def _clear_dependency_overrides():
+    """Prevent dependency_overrides set in one test from leaking into the next."""
+    from app.main import app
+    yield
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
 def _force_offline(monkeypatch):
     """Tests are hermetic: pin the model brain to the offline FakeQwen AND force the deterministic
     canned search provider, regardless of whatever real keys sit in the developer's .env (the web

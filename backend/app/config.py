@@ -17,9 +17,11 @@ class Settings(BaseSettings):
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_region: str = "ap-southeast-1"
 
-    # Model-tier registry (placeholders; confirm real names on day 1).
+    # Model-tier registry — pinned to what dashscope-intl serves, verified on a real key to accept
+    # enable_thinking + prompt-JSON (Phase 1). The intl region exposes a dated snapshot for `plus`
+    # but only floating aliases for `max`/`flash`, so those stay aliases. All are .env-overridable.
     qwen_model_max: str = "qwen-max"
-    qwen_model_plus: str = "qwen-plus"
+    qwen_model_plus: str = "qwen-plus-2025-12-01"
     qwen_model_flash: str = "qwen-flash"
     qwen_model_vision: str = "qwen-vl-max"  # multimodal — reads images (Qwen-VL)
 
@@ -39,6 +41,11 @@ class Settings(BaseSettings):
     session_secret: str = "change-me-in-prod"
     engine_host: str = "0.0.0.0"
     engine_port: int = 8000
+    # Ops surface (all .env-overridable). CORS defaults open for local-only; lock down to expose.
+    cors_origins: str = "*"  # comma-separated origin list, or "*"
+    max_upload_mb: int = 25  # cap on uploaded files (/documents, /parse, /transcribe) — DoS guard
+    db_pool_max_size: int = 10
+    rate_limit_per_min: int = 0  # per-IP cap on expensive POSTs (0 = off; set >0 when exposed)
 
     # Boundary.
     first_hunt_cap_usd: float = 0.50
@@ -53,6 +60,12 @@ class Settings(BaseSettings):
     search_api_key: str = ""  # Tavily (the primary web-search vendor)
     search_max_results: int = 8
     search_cache_ttl_s: float = 3600.0  # reuse identical searches/URL reads within the window
+    # Fan-out timing: return at the SOFT deadline once we have any ground, extend to the hard
+    # BUDGET only when still empty, and let CONCURRENCY parallel scouts hit one upstream at once
+    # (sized so a full pack doesn't pile up to zero hits). Tunable per environment via .env.
+    search_soft_s: float = 2.5
+    search_budget_s: float = 7.0
+    search_provider_concurrency: int = 6
 
     # Multi-source research — every provider with a key present joins the fan-out; keyless ones
     # (Hacker News, Wikidata, DBpedia, OpenAlex) always run. ALL empty → canned offline provider.

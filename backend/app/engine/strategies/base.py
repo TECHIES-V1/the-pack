@@ -76,6 +76,14 @@ PLAN_SCHEMA: dict = {
         "assumptions": {"type": "array", "items": {"type": "string"}},
         "est_cost": {"type": "number"},
         "est_time": {"type": "number"},
+        # v2: the team Alpha should build — Beta sizes the pack to the task (mainly the scout count).
+        "team": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"role": {"type": "string"}, "count": {"type": "integer"}},
+            },
+        },
     },
 }
 
@@ -126,6 +134,27 @@ GAPS_SCHEMA: dict = {
     "properties": {"gaps": {"type": "array", "items": {"type": "string"}}},
 }
 
+# v2: Howler writes the brief as TAGGED BLOCKS so every line carries its sources (the gate for
+# click-any-line → source). `source_ids` index the numbered source list given in the draft context.
+DRAFT_SCHEMA: dict = {
+    "type": "object",
+    "required": ["title", "blocks"],
+    "properties": {
+        "title": {"type": "string"},
+        "blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "source_ids": {"type": "array", "items": {"type": "integer"}},
+                },
+            },
+        },
+    },
+}
+
 
 # --- the engine surface a strategy drives -------------------------------------------------
 
@@ -163,6 +192,10 @@ class Engine(Protocol):
     async def finish(self, draft_text: str, merged: Merged) -> None: ...
 
     async def progress(self, wolf_id: str, phase: str, text: str) -> None: ...
+
+    async def clone(self, wolf_id: str) -> str: ...
+
+    async def spawn(self, role: str) -> str: ...
 
 
 # --- the strategy base --------------------------------------------------------------------

@@ -1,234 +1,204 @@
-"""Generate the Postman collection + environment for the Pack engine REST surface.
+"""Generate docs/postman/Pack.postman_collection.json from the live FastAPI OpenAPI spec.
 
-Run from the repo root: backend/.venv/Scripts/python.exe backend/scripts/gen_postman.py
-Writes docs/postman/Pack.postman_collection.json and Pack.postman_environment.json.
+Run:  python -m scripts.gen_postman
+
+Produces a Postman v2.1 collection with:
+- Endpoints grouped by tag, named from their OpenAPI summary
+- Real example JSON bodies derived from Pydantic schemas (enums use first value, etc.)
+- multipart/form-data endpoints use Postman's formdata body mode (not JSON)
+- Query parameters listed with description/required flag from the spec
+- Path variables in Postman :variable syntax
+- Each request carries a description from the OpenAPI operation
 """
-
 from __future__ import annotations
 
 import json
-import os
+import re
+from pathlib import Path
+
+from app.main import app
+
+_OUT = Path(__file__).resolve().parents[2] / "docs" / "postman" / "Pack.postman_collection.json"
 
 
-def url(path: str) -> dict:
-    segs = [s for s in path.split("/") if s != ""]
-    return {"raw": "{{baseUrl}}" + path, "host": ["{{baseUrl}}"], "path": segs}
+# ---------------------------------------------------------------------------
+# Schema → example value
+# ---------------------------------------------------------------------------
+
+def _example_scalar(schema: dict) -> object:
+    """Return a plausible example for a primitive schema node."""
+    if "enum" in schema:
+        return schema["enum"][0]
+    t = schema.get("type")
+    if t == "boolean":
+        return False
+    if t in ("number", "integer"):
+        lo = schema.get("minimum", 0)
+        hi = schema.get("maximum")
+        if hi is not None:
+            return round(min(lo + (hi - lo) * 0.1, hi), 2) if lo != hi else lo
+        return lo
+    if t == "string":
+        fmt = schema.get("format", "")
+        if fmt == "uuid":
+            return "00000000-0000-0000-0000-000000000000"
+        if fmt == "date-time":
+            return "2024-01-01T00:00:00Z"
+        desc = schema.get("description") or schema.get("title") or ""
+        slug = re.sub(r"[^a-z0-9_]", "_", desc.lower())[:30].strip("_") or "value"
+        return f"<{slug}>"
+    if t == "array":
+        return [_example_value(schema.get("items", {}), {})]
+    if t == "object":
+        return {}
+    return None
 
 
-def req(name, method, path, desc, body=None, tests=None) -> dict:
-    r = {
-        "name": name,
-        "request": {"method": method, "header": [], "url": url(path), "description": desc},
-        "response": [],
-    }
-    if body is not None:
-        r["request"]["header"].append({"key": "Content-Type", "value": "application/json"})
-        r["request"]["body"] = {
-            "mode": "raw",
-            "raw": json.dumps(body, indent=2),
-            "options": {"raw": {"language": "json"}},
+def _resolve(spec: dict, schema: dict) -> dict:
+    """Follow a single $ref one level deep."""
+    ref = schema.get("$ref", "")
+    if not ref:
+        return schema
+    parts = ref.lstrip("#/").split("/")
+    node = spec
+    for p in parts:
+        node = node.get(p, {})
+    return node
+
+
+def _example_value(schema: dict, spec: dict) -> object:
+    schema = _resolve(spec, schema)
+    # anyOf / oneOf — pick the first non-null branch
+    for key in ("anyOf", "oneOf"):
+        branches = schema.get(key, [])
+        non_null = [b for b in branches if b.get("type") != "null"]
+        if non_null:
+            return _example_value(non_null[0], spec)
+    if schema.get("type") == "object" or "properties" in schema:
+        return {
+            field: _example_value(fschema, spec)
+            for field, fschema in (schema.get("properties") or {}).items()
         }
-    if tests:
-        r["event"] = [{"listen": "test", "script": {"type": "text/javascript", "exec": tests}}]
-    return r
+    return _example_scalar(schema)
 
 
-capture_hunt = [
-    "const j = pm.response.json();",
-    "if (j && j.hunt_id) { pm.collectionVariables.set('huntId', j.hunt_id); }",
-]
+def _example_body(spec: dict, op: dict) -> str | None:
+    """Return a pretty-printed JSON example body, or None if no JSON body."""
+    rb = op.get("requestBody") or {}
+    content = rb.get("content") or {}
+    json_schema = (content.get("application/json") or {}).get("schema")
+    if not json_schema:
+        return None
+    return json.dumps(_example_value(json_schema, spec), indent=2)
 
-collection = {
-    "info": {
-        "name": "Pack Engine API",
-        "_postman_id": "pack-engine-collection",
-        "description": (
-            "Pack -- multi-agent hunt orchestrator. REST command surface for the Python engine.\n\n"
-            "Model: commands return 202 Accepted with a small ack; the result is never in the HTTP "
-            "response -- it arrives on the event stream (WS/SSE via the gateway). The exceptions are "
-            "the read endpoints (GET) and the conversational POST /hunts/intake and "
-            "POST /hunts/{id}/ask, which reply synchronously.\n\n"
-            "Typical flow: POST /hunts/intake (clarify) -> POST /hunts (create) -> watch stream -> "
-            "POST /hunts/{id}/plan/approve -> (/holds/{hold_id}/resolve when a Hold opens) -> "
-            "returned -> GET /hunts/{id}/artifact.\n\n"
-            "Set {{baseUrl}} in the environment. 'Create hunt' auto-saves {{huntId}}."
-        ),
-        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    },
-    "variable": [
-        {"key": "baseUrl", "value": "http://localhost:8000"},
-        {"key": "huntId", "value": ""},
-        {"key": "holdId", "value": ""},
-        {"key": "instinctId", "value": ""},
-    ],
-    "item": [
-        {
-            "name": "System",
-            "item": [req("Health", "GET", "/health", "Liveness probe. Returns {status, service}.")],
-        },
-        {
-            "name": "Conversation (front door)",
-            "item": [
-                req(
-                    "Intake -- talk to Alpha (clarify-gate)",
-                    "POST",
-                    "/hunts/intake",
-                    "Alpha holds a normal conversation and decides if there's a real task yet. "
-                    "Synchronous reply {reply, ready, brief}. ready=false means keep chatting (no "
-                    "hunt, no cost); ready=true means brief is an actionable task -- create a hunt "
-                    "with it. Send the whole conversation so far in messages.",
-                    body={
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "research the BNPL market in Nigeria and write me a brief",
-                            }
-                        ]
-                    },
-                ),
-                req(
-                    "Ask Alpha (about a hunt)",
-                    "POST",
-                    "/hunts/{{huntId}}/ask",
-                    "Ask Alpha a question about the running/finished hunt. Synchronous on-voice "
-                    "reply {reply}. Does not change hunt state.",
-                    body={"question": "How's it going so far?"},
-                ),
-            ],
-        },
-        {
-            "name": "Hunts -- create & inspect",
-            "item": [
-                req(
-                    "Create hunt",
-                    "POST",
-                    "/hunts",
-                    "Open a hunt (202). The Supervisor starts planning immediately; watch "
-                    "hunt_created -> plan_proposed on the stream. Provide input (free text, usually "
-                    "Alpha's brief) OR instinct_id to start from a saved Instinct. source is one of "
-                    "typed | spoken | dropped. Saves {{huntId}}.",
-                    body={
-                        "input": "Research the BNPL market in Nigeria and write a brief.",
-                        "source": "typed",
-                    },
-                    tests=capture_hunt,
-                ),
-                req("List hunts", "GET", "/hunts", "All hunts (newest first) for the Den."),
-                req(
-                    "Get hunt snapshot",
-                    "GET",
-                    "/hunts/{{huntId}}",
-                    "Current state snapshot {hunt_id, state, last_seq, task} -- used to resume the "
-                    "stream.",
-                ),
-                req(
-                    "Get final artifact",
-                    "GET",
-                    "/hunts/{{huntId}}/artifact",
-                    "The deliverable once the hunt has returned (the Return document).",
-                ),
-                req(
-                    "Export tracks (event log)",
-                    "GET",
-                    "/hunts/{{huntId}}/tracks/export",
-                    "Full, ordered event log {hunt_id, events[], redacted} -- powers Tracks.",
-                ),
-            ],
-        },
-        {
-            "name": "Hunts -- run lifecycle",
-            "item": [
-                req(
-                    "Approve plan (set Boundary, launch)",
-                    "POST",
-                    "/hunts/{{huntId}}/plan/approve",
-                    "Approve the proposed plan and set the spend Boundary -- the hunt begins (202). "
-                    "mode is one of wild | on_signal | on_command. edits optionally overrides plan "
-                    "assumptions.",
-                    body={"mode": "on_signal", "boundary_usd": 1.0, "edits": None},
-                ),
-                req(
-                    "Resolve a Hold",
-                    "POST",
-                    "/hunts/{{huntId}}/holds/{{holdId}}/resolve",
-                    "Answer the one open Hold so the pack resumes (202). resolution is the chosen "
-                    "option; edited_text optionally supplies corrected text.",
-                    body={"resolution": "Use the regulator's figure", "edited_text": None},
-                ),
-                req(
-                    "Add input mid-hunt",
-                    "POST",
-                    "/hunts/{{huntId}}/inputs",
-                    "Feed new material to a running hunt (202).",
-                ),
-                req(
-                    "Stop hunt",
-                    "POST",
-                    "/hunts/{{huntId}}/stop",
-                    "Stop the hunt by the Packmaster's command (202).",
-                ),
-                req(
-                    "Resume after Boundary halt",
-                    "POST",
-                    "/hunts/{{huntId}}/resume",
-                    "Lift a Boundary halt with a new cap and continue (202).",
-                    body={"boundary_usd": 2.0},
-                ),
-                req(
-                    "Benchmark -- Lone Wolf vs Pack",
-                    "POST",
-                    "/hunts/{{huntId}}/benchmark",
-                    "Run the same task single-agent for the Scorecard comparison (202). Stub today.",
-                ),
-            ],
-        },
-        {
-            "name": "Den -- Instincts",
-            "item": [
-                req("List instincts", "GET", "/instincts", "Saved Instincts (reusable hunt templates)."),
-                req(
-                    "Save instinct",
-                    "POST",
-                    "/instincts",
-                    "Save a hunt setup as a one-tap Instinct. Copy instinct_id from the response.",
-                    body={"label": "The Newsroom", "spec": {"pattern": "research", "voice": "briefing"}},
-                ),
-            ],
-        },
-        {
-            "name": "Uploads",
-            "item": [
-                req(
-                    "Signed upload URL",
-                    "POST",
-                    "/uploads",
-                    "Get a pre-signed object-store URL for a file drop {upload_url, object_key} (202).",
-                )
-            ],
-        },
-    ],
-}
 
-environment = {
-    "name": "Pack -- Local",
-    "values": [
-        {"key": "baseUrl", "value": "http://localhost:8000", "enabled": True},
-        {"key": "huntId", "value": "", "enabled": True},
-        {"key": "holdId", "value": "", "enabled": True},
-        {"key": "instinctId", "value": "", "enabled": True},
-    ],
-    "_postman_variable_scope": "environment",
-}
+# ---------------------------------------------------------------------------
+# URL construction
+# ---------------------------------------------------------------------------
 
-root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-out = os.path.join(root, "docs", "postman")
-os.makedirs(out, exist_ok=True)
-with open(os.path.join(out, "Pack.postman_collection.json"), "w", encoding="utf-8") as f:
-    json.dump(collection, f, indent=2)
-    f.write("\n")
-with open(os.path.join(out, "Pack.postman_environment.json"), "w", encoding="utf-8") as f:
-    json.dump(environment, f, indent=2)
-    f.write("\n")
+def _postman_url(path: str, query_params: list[dict]) -> dict:
+    """Build a Postman URL object from an OpenAPI path string."""
+    pm_path = re.sub(r"\{(\w+)\}", r":\1", path)
+    segs = [s for s in pm_path.strip("/").split("/") if s]
+    url: dict = {
+        "raw": "{{baseUrl}}" + path,
+        "host": ["{{baseUrl}}"],
+        "path": segs,
+    }
+    if query_params:
+        url["query"] = [
+            {
+                "key": p["name"],
+                "value": "",
+                "description": p.get("description") or "",
+                "disabled": not p.get("required", False),
+            }
+            for p in query_params
+        ]
+    return url
 
-count = sum(len(folder["item"]) for folder in collection["item"])
-print(f"wrote {count} requests across {len(collection['item'])} folders to {out}")
+
+# ---------------------------------------------------------------------------
+# Main builder
+# ---------------------------------------------------------------------------
+
+def build(spec: dict) -> dict:
+    groups: dict[str, list] = {}
+
+    for path in sorted(spec["paths"]):
+        methods = spec["paths"][path]
+        for method, op in methods.items():
+            if method not in {"get", "post", "patch", "delete", "put"}:
+                continue
+
+            tag = (op.get("tags") or ["misc"])[0]
+            summary = op.get("summary") or f"{method.upper()} {path}"
+            description = op.get("description") or ""
+
+            query_params = [p for p in (op.get("parameters") or []) if p.get("in") == "query"]
+
+            rb = op.get("requestBody") or {}
+            content_types = list((rb.get("content") or {}).keys())
+            is_form = any("multipart" in ct or "form" in ct for ct in content_types)
+
+            request: dict = {
+                "method": method.upper(),
+                "url": _postman_url(path, query_params),
+                "description": description,
+            }
+
+            if is_form:
+                form_schema: dict = {}
+                for ct, ct_obj in (rb.get("content") or {}).items():
+                    if "multipart" in ct or "form" in ct:
+                        form_schema = _resolve(spec, ct_obj.get("schema") or {})
+                        break
+                props = form_schema.get("properties") or {"file": {}}
+                request["body"] = {
+                    "mode": "formdata",
+                    "formdata": [
+                        {"key": fname, "type": "file" if fname == "file" else "text", "value": ""}
+                        for fname in props
+                    ],
+                }
+            elif method in {"post", "put", "patch"}:
+                example = _example_body(spec, op)
+                if example:
+                    request["body"] = {
+                        "mode": "raw",
+                        "raw": example,
+                        "options": {"raw": {"language": "json"}},
+                    }
+                    request["header"] = [{"key": "Content-Type", "value": "application/json"}]
+
+            groups.setdefault(tag, []).append({
+                "name": f"{summary}  [{method.upper()}]",
+                "request": request,
+            })
+
+    return {
+        "info": {
+            "name": "Pack Engine",
+            "description": (
+                "Auto-generated from the FastAPI OpenAPI spec — do not hand-edit.\n\n"
+                "Re-generate after adding routes:  `python -m scripts.gen_postman`\n\n"
+                "Set the `baseUrl` collection variable to `http://localhost:8000` (default)."
+            ),
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        },
+        "item": [{"name": tag, "item": items} for tag, items in sorted(groups.items())],
+        "variable": [{"key": "baseUrl", "value": "http://localhost:8000"}],
+    }
+
+
+def main() -> None:
+    spec = app.openapi()
+    collection = build(spec)
+    _OUT.parent.mkdir(parents=True, exist_ok=True)
+    _OUT.write_text(json.dumps(collection, indent=2) + "\n", encoding="utf-8")
+    count = sum(len(g["item"]) for g in collection["item"])
+    print(f"wrote {count} endpoints across {len(collection['item'])} groups -> {_OUT}")
+
+
+if __name__ == "__main__":
+    main()
