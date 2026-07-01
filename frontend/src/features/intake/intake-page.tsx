@@ -62,6 +62,7 @@ function LiveBars({ getLiveBars }: { getLiveBars: () => number[] }) {
 export default function IntakePage() {
   const [mode, setMode] = useState<Mode>('Signal')
   const [showModeMenu, setShowModeMenu] = useState(false)
+  const modeMenuRef = useRef<HTMLDivElement>(null)
 
   // Voice recorder state
   const [voicePeaks, setVoicePeaks] = useState<number[]>([])
@@ -99,6 +100,18 @@ export default function IntakePage() {
     return () => { if (audioUrl) URL.revokeObjectURL(audioUrl) }
   }, [audioUrl])
 
+  // Close mode menu on click outside
+  useEffect(() => {
+    if (!showModeMenu) return
+    const close = (e: MouseEvent) => {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
+        setShowModeMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [showModeMenu])
+
   // Reset all voice state when audio file is removed
   useEffect(() => {
     if (!audioFile) {
@@ -111,7 +124,7 @@ export default function IntakePage() {
     }
   }, [audioFile])
 
-  const startTracking = () => {
+  const startTracking = useCallback(() => {
     const tick = () => {
       const el = audioRef.current
       if (el && !el.paused && el.duration > 0) {
@@ -120,9 +133,9 @@ export default function IntakePage() {
       }
     }
     playRafRef.current = requestAnimationFrame(tick)
-  }
+  }, [])
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     const el = audioRef.current
     if (!el) return
     if (isPlaying) {
@@ -134,25 +147,25 @@ export default function IntakePage() {
       setIsPlaying(true)
       startTracking()
     }
-  }
+  }, [isPlaying, startTracking])
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const el = audioRef.current
     if (!el || !el.duration) return
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     el.currentTime = ratio * el.duration
     setPlayProgress(ratio)
-  }
+  }, [])
 
-  const discardVoiceMemo = () => {
+  const discardVoiceMemo = useCallback(() => {
     if (audioFile) removeFile(audioFile.localId)
     cancelAnimationFrame(playRafRef.current)
     setIsPlaying(false)
     setPlayProgress(0)
     setPlayDuration(0)
     setVoicePeaks([])
-  }
+  }, [audioFile, removeFile])
 
   return (
     <div
@@ -321,7 +334,7 @@ export default function IntakePage() {
 
                 <div className="flex-1" />
 
-                <div className="relative">
+                <div className="relative" ref={modeMenuRef}>
                   <button
                     onClick={() => setShowModeMenu((v) => !v)}
                     className="flex items-center gap-1 text-sm text-[#888] hover:text-white transition-colors"
