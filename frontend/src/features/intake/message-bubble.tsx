@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils'
 import type { Message } from './use-intake'
 
 interface Props {
@@ -11,8 +10,8 @@ function ThinkingDots() {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="w-1.5 h-1.5 rounded-full bg-muted animate-pulse"
-          style={{ animationDelay: `${i * 200}ms` }}
+          className="w-1.5 h-1.5 rounded-full animate-pulse"
+          style={{ backgroundColor: '#555', animationDelay: `${i * 200}ms` }}
         />
       ))}
     </div>
@@ -23,9 +22,9 @@ export function MessageBubble({ message }: Props) {
   const isAlpha = message.role === 'alpha'
 
   return (
-    <div className={cn('flex flex-col gap-1', isAlpha ? 'items-start' : 'items-start')}>
+    <div className="flex flex-col gap-1">
       {isAlpha && (
-        <span className="text-[10px] uppercase tracking-widest text-muted font-medium">
+        <span className="text-[10px] uppercase tracking-widest font-medium" style={{ color: '#555' }}>
           Alpha
         </span>
       )}
@@ -33,10 +32,8 @@ export function MessageBubble({ message }: Props) {
         <ThinkingDots />
       ) : (
         <p
-          className={cn(
-            'text-sm leading-relaxed whitespace-pre-wrap',
-            isAlpha ? 'text-text-dim' : 'text-text',
-          )}
+          className="text-sm leading-relaxed whitespace-pre-wrap"
+          style={{ color: isAlpha ? '#888' : '#f0f0f0' }}
         >
           {message.text}
         </p>
